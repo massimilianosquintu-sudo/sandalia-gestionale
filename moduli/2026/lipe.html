@@ -1,0 +1,1038 @@
+<!doctype html><html><head><script>/* Navigazione interna: le sezioni si aprono sempre nella stessa pagina, senza nuove pagine o schede */
+(function(){
+  if(window.__navGuard) return; window.__navGuard=1;
+  document.addEventListener('click',function(e){
+    var a=e.target&&e.target.closest&&e.target.closest('a[href]'); if(!a) return;
+    var h=a.getAttribute('href')||'';
+    if(a.hasAttribute('download')||/^(blob:|data:)/i.test(h)) return;
+    if(h===''||h.charAt(0)==='#'||/^javascript:/i.test(h)){
+      e.preventDefault();
+      if(h.length>1&&h.charAt(0)==='#'){ var t=document.getElementById(decodeURIComponent(h.slice(1))); if(t&&t.scrollIntoView) t.scrollIntoView({block:'start'}); }
+    }
+  },true);
+  document.addEventListener('submit',function(e){ e.preventDefault(); },true);
+})();
+</script><script>/* Suite Dichiarazioni – ponte con la finestra principale (iniettato in testa a ogni app) */
+(function(){
+  var APP='lipe', P=null;
+  window.SUITE_APP=APP;
+  try{ if(window.parent && window.parent!==window && window.parent.SUITE) P=window.parent; }catch(e){ P=null; }
+  window.SUITE_PARENT=P;
+  if(!P) return;
+  /* archivio condiviso: nella versione pubblicata ogni app usa le proprie raccolte (prefisso app) */
+  try{ if(P.claude && P.claude.use){ window.claude={use:function(n){ return P.suiteUse(n,APP); }}; } }catch(e){}
+  /* download: nella versione pubblicata passano dal salvataggio della pagina principale */
+  var oc=HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click=function(){
+    try{ if(this.download && /^(blob:|data:)/.test(this.href) && P.SUITE_DL && P.suiteSaveFile(this.download,this.href)) return; }catch(e){}
+    return oc.call(this);
+  };
+  /* scorciatoie da tastiera della suite (Alt+1…6) anche dentro le app */
+  document.addEventListener('keydown',function(e){ if(e.altKey && !e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)){ e.preventDefault(); try{ P.SUITE.openByIndex(+e.key-1); }catch(_){} } });
+  /* pulsanti "Compila il Modello F24" presenti nelle viste dei versamenti */
+  document.addEventListener('click',function(e){ var b=e.target && e.target.closest && e.target.closest('[data-suite-f24]'); if(!b) return; e.preventDefault(); try{ P.SUITE.sendF24(APP); }catch(err){ console.error(err); } });
+})();
+</script><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+
+<title>LIPE 2026</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Courier+Prime:wght@400;700&display=swap">
+<style>
+/* Layout: barra superiore + colonna periodi + quadro VP al centro + riepilogo dei trimestri a destra */
+:root{
+  --bg:#eceff0; --panel:#f8fafa; --ink:#14222a; --muted:#5b6b72; --line:#ccd6d9;
+  --acc:#0f5e6e; --acc-soft:#ddeef1; --on-acc:#ffffff;
+  --calc:#fff1c2; --calc-ink:#5a4300; --auto:#e3edfb; --auto-ink:#1d4f91;
+  --ok:#2c7a4b; --warn:#a86300; --err:#b3261e;
+  --paper:#ffffff; --field-hover:rgba(15,94,110,.10);
+  --f-ui:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --f-val:"Courier Prime","Courier New",Courier,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111a1d; --panel:#18242a; --ink:#e3ecee; --muted:#93a6ad; --line:#2c3b41;
+  --acc:#6cc3d3; --acc-soft:#1d3a41; --on-acc:#0b1a1e; --paper:#1d2b31;
+  --calc:#3a3216; --calc-ink:#f3dc93; --auto:#1c2c45; --auto-ink:#a9c6f2;
+  --ok:#6cc893; --warn:#f0b35a; --err:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111a1d; --panel:#18242a; --ink:#e3ecee; --muted:#93a6ad; --line:#2c3b41;
+  --acc:#6cc3d3; --acc-soft:#1d3a41; --on-acc:#0b1a1e; --paper:#1d2b31;
+  --calc:#3a3216; --calc-ink:#f3dc93; --auto:#1c2c45; --auto-ink:#a9c6f2;
+  --ok:#6cc893; --warn:#f0b35a; --err:#ff8a80; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:14px;line-height:1.4}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--panel)}
+button,select,input{font-family:inherit;font-size:inherit;color:inherit}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--panel);border-bottom:1px solid var(--line);
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px}
+.brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand b{font-weight:700;letter-spacing:.02em;color:var(--acc);font-size:15px;white-space:nowrap}
+.brand span{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+.actions{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.btn{border:1px solid var(--line);background:var(--panel);padding:6px 11px;border-radius:6px;cursor:pointer;font-weight:500;color:var(--ink)}
+.btn:hover{border-color:var(--acc)}
+.btn:focus-visible,.nav button:focus-visible,.chip:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.btn.pri{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
+.btn.danger{color:var(--err)}
+.btn.sm{padding:4px 9px;font-size:12.5px}
+.btn[disabled]{opacity:.5;cursor:default}
+.shell{display:grid;grid-template-columns:214px minmax(0,1fr) 290px;min-height:calc(100% - 56px)}
+.nav{border-right:1px solid var(--line);padding:12px 8px 12px max(8px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:2px;background:var(--panel)}
+.nav h4{margin:12px 8px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.nav h4 small{display:block;text-transform:none;letter-spacing:0;font-weight:400;font-size:11px}
+.nav button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:none;padding:6px 8px;border-radius:6px;cursor:pointer}
+.nav button:hover{background:var(--field-hover)}
+.nav button.on{background:var(--acc-soft);color:var(--acc);font-weight:600}
+.nav .code{font-family:var(--f-val);font-weight:700;width:30px;font-size:12.5px}
+.nav .lbl{flex:1;min-width:0;font-size:12.5px;line-height:1.2}
+.dot{width:8px;height:8px;border-radius:50%;background:transparent;border:1px solid var(--line);flex:none}
+.dot.c{background:var(--ok);border-color:var(--ok)}
+.dot.e{background:var(--err);border-color:var(--err)}
+main{min-width:0;padding:14px 16px 60px}
+.sum{border-left:1px solid var(--line);background:var(--panel);padding:14px max(14px,env(safe-area-inset-right,0px)) 30px 14px;display:flex;flex-direction:column;gap:16px}
+.sum h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px}
+.kv .v{font-family:var(--f-val);font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.big{font-family:var(--f-val);font-size:22px;font-weight:700;color:var(--acc);font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;font-weight:600;border:1px solid currentColor;white-space:nowrap}
+.pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.err{color:var(--err)} .pill.mut{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:12px}
+.bar h2{margin:0;font-size:17px;text-wrap:balance}
+.bar .sub{color:var(--muted);font-size:12.5px;font-weight:400;display:block;margin-top:2px}
+.bar .tools{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;align-items:center}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:14px}
+.card h3{margin:0 0 4px;font-size:15px}
+.card .hint{margin:0 0 12px;color:var(--muted);font-size:12.5px}
+.muted{color:var(--muted)}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px 16px}
+.form label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--muted)}
+.form label.chk{flex-direction:row;align-items:center;gap:7px;color:var(--ink)}
+.form label.wide{grid-column:1/-1}
+.form input:not([type=checkbox]):not([type=radio]),.form select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:6px 8px;min-width:0}
+.form input.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;padding:2px;gap:2px;background:var(--bg);flex-wrap:wrap}
+.seg button{border:0;background:transparent;border-radius:5px;padding:5px 10px;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+/* quadro VP con la struttura del modello: rigo, descrizione, colonna debiti, colonna crediti */
+.vp{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.vp th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+.vp th.n{text-align:right;width:170px}
+.vp td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.vp tr:last-child td{border-bottom:0}
+.vp td.code{font-family:var(--f-val);font-weight:700;color:var(--acc);width:52px}
+.vp td.d{font-size:13px}
+.vp td.d small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px}
+.vp td.n{text-align:right;width:170px}
+.vp tr.tot td{background:var(--acc-soft)}
+.num{width:150px;max-width:100%;text-align:right;font-family:var(--f-val);font-weight:700;font-size:14px;border:1px solid var(--line);background:var(--bg);border-radius:5px;padding:5px 7px;color:var(--ink);font-variant-numeric:tabular-nums}
+.num:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-soft)}
+.num.auto{background:var(--auto);color:var(--auto-ink)}
+.num.ovr{border-style:dashed;border-color:var(--warn)}
+.calcv{display:inline-block;min-width:150px;text-align:right;font-family:var(--f-val);font-weight:700;font-size:14px;background:var(--calc);color:var(--calc-ink);border-radius:5px;padding:5px 7px;font-variant-numeric:tabular-nums}
+.calcv.z{opacity:.55}
+.rst{border:0;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 4px;text-decoration:underline}
+.inl{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:13px}
+.inl label{display:inline-flex;align-items:center;gap:6px}
+.inl label{max-width:100%;flex-wrap:wrap}
+.inl select{max-width:100%;font:inherit;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:4px 6px;color:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin:8px 0 12px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:5px;border:1px solid var(--line)}
+.esito{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--acc);border-radius:6px;padding:9px 12px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13px}
+.esito b{font-family:var(--f-val);font-variant-numeric:tabular-nums}
+table.t{border-collapse:collapse;width:100%;font-size:13px}
+table.t th,table.t td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
+table.t th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+table.t td.n,table.t th.n{text-align:right;font-family:var(--f-val);font-variant-numeric:tabular-nums;white-space:nowrap}
+table.t th.n{font-family:var(--f-ui)}
+table.t td.code{font-family:var(--f-val);font-weight:700}
+table.t tr.sub td{background:var(--acc-soft);font-weight:600}
+.tw{overflow-x:auto}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;cursor:pointer;font-weight:500}
+.chip[aria-pressed="true"]{background:var(--acc);border-color:var(--acc);color:var(--on-acc)}
+.ctrl{padding-left:0;list-style:none;margin:0}
+.ctrl li{margin:4px 0;padding:6px 10px;border-radius:6px;font-size:13px;border-left:3px solid}
+.ctrl li.e{border-color:var(--err);background:color-mix(in srgb,var(--err) 9%,transparent)}
+.ctrl li.w{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 9%,transparent)}
+.ctrl li.o{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.ctrl a{color:var(--acc);cursor:pointer;text-decoration:underline}
+pre.xml{font-family:var(--f-val);font-size:11.5px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:380px;white-space:pre;margin:0}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:7px;z-index:50;font-size:13px;max-width:90vw}
+.banner{background:var(--auto);color:var(--auto-ink);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px}
+.banner.w{background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--ink)}
+.confirm{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px}
+.empty{color:var(--muted);font-size:13px;border:1px dashed var(--line);border-radius:8px;padding:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+@media (max-width:1180px){.shell{grid-template-columns:190px minmax(0,1fr)}.sum{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
+@media (max-width:760px){.shell{grid-template-columns:minmax(0,1fr)}.nav{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px))}
+  .nav h4{width:100%;margin:6px 4px 2px}.nav h4 small{display:inline;margin-left:6px}.nav button{width:auto}.nav .lbl{display:none}.actions{margin-left:0}
+  main{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .vp thead{display:none}.vp tbody{display:block}
+  .vp tr{display:grid;grid-template-columns:44px 1fr 1fr;border-bottom:1px solid var(--line)}
+  .vp td{display:block;border:0;padding:6px 8px}.vp td.code{grid-row:1/3;width:auto}.vp td.d{grid-column:2/4}
+  .vp td.n{width:auto;text-align:left}.vp td.n:empty{display:none}
+  .vp td.n:nth-child(3)::before{content:"Debiti";display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .vp td.n:nth-child(4)::before{content:"Crediti";display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .num,.calcv{width:100%;min-width:0}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header class="top">
+  <div class="brand"><b>LIPE 2026</b><span id="hdrName">—</span></div>
+  <div class="actions">
+    <button class="btn" id="bNew" type="button">Nuova</button>
+    <button class="btn" id="bSave" type="button">Salva in archivio</button>
+    <button class="btn" id="bArch" type="button">Archivio</button>
+    <button class="btn" id="bLoad" type="button">Carica da file</button>
+    <button class="btn" id="bImp" type="button">Importa XML</button>
+    <button class="btn" id="bPdf" type="button">Stampa PDF</button>
+    <button class="btn pri" id="bTel" type="button">File telematico</button>
+  </div>
+</header>
+<div class="shell">
+  <nav class="nav" id="nav" aria-label="Sezioni della comunicazione"></nav>
+  <main id="main"></main>
+  <aside class="sum" id="sum" aria-label="Riepilogo"></aside>
+</div>
+<input type="file" id="fileJson" accept=".json,application/json" hidden>
+<input type="file" id="fileXml" accept=".xml,.txt,application/xml,text/xml" hidden>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+/* LIPE 2026 – Comunicazione delle liquidazioni periodiche IVA (art. 21-bis D.L. 78/2010), fornitura IVP18 */
+(function(){
+'use strict';
+const ANNO=2026, NS='urn:www.agenziaentrate.gov.it:specificheTecniche:sco:ivp';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const MESI=['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+const Cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+const ROM=['','I','II','III','IV'];
+/* scadenze 2026: versamenti (con slittamento a lunedì e proroga di agosto) e invio delle comunicazioni */
+const SCAD_M={1:'2026-02-16',2:'2026-03-16',3:'2026-04-16',4:'2026-05-18',5:'2026-06-16',6:'2026-07-16',7:'2026-08-20',8:'2026-09-16',9:'2026-10-16',10:'2026-11-16',11:'2026-12-16',12:'2027-01-18'};
+const SCAD_T={1:'2026-05-18',2:'2026-08-20',3:'2026-11-16',4:'2027-02-16'};
+const SCAD_T4_ANN='2027-03-16', SCAD_RINVIO='2026-12-16', SCAD_ACC='2026-12-28';
+const INVIO={1:'2026-06-01',2:'2026-09-30',3:'2026-11-30',4:'2027-03-01'};
+const SOGLIA=100, ACC_MIN=103.29;
+const CARICHE=[['1','1 – Rappresentante legale, negoziale o di fatto, socio amministratore'],['2','2 – Rappresentante di minore, inabilitato o interdetto, curatore dell’eredità giacente'],['3','3 – Curatore fallimentare o della liquidazione giudiziale'],['4','4 – Commissario liquidatore (liquidazione coatta o amministrazione straordinaria)'],['5','5 – Custode o amministratore giudiziario'],['6','6 – Rappresentante fiscale di soggetto non residente'],['7','7 – Erede'],['8','8 – Liquidatore (liquidazione volontaria)'],['9','9 – Soggetto tenuto per conto del soggetto estinto (operazioni straordinarie)'],['11','11 – Tutore del minore o interdetto, curatore di minore emancipato'],['12','12 – Liquidatore di ditta individuale (periodo ante liquidazione)'],['13','13 – Amministratore di condominio'],['14','14 – Soggetto che sottoscrive per conto di una pubblica amministrazione'],['15','15 – Commissario liquidatore di una pubblica amministrazione']];
+const METODI=[['1','1 – Storico (88% del versamento del periodo corrispondente dell’anno precedente)'],['2','2 – Previsionale (88% dell’IVA che si prevede di dover versare)'],['3','3 – Analitico (operazioni effettuate fino al 20 dicembre)'],['4','4 – Soggetti di particolari settori (telecomunicazioni, acqua, energia, gas, rifiuti)']];
+
+/* ---------- numeri ---------- */
+const r2=n=>Math.round(((+n)||0)*100+(n<0?-1e-9:1e-9))/100;
+const nz=v=>(v==null||v===''||isNaN(v))?0:+v;
+function fmt(n,blankZero){ if(n==null||n==='') return ''; n=+n; if(blankZero&&!n) return ''; const neg=n<0, c=Math.round(Math.abs(n)*100);
+  return (neg&&c?'-':'')+String(Math.floor(c/100)).replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+String(c%100).padStart(2,'0'); }
+function parseAmt(s,neg){ if(s==null) return null; s=String(s).trim().replace(/\s|€/g,''); if(!s) return null;
+  let sign=1; if(s[0]==='-'){ sign=-1; s=s.slice(1); } else if(s[0]==='+') s=s.slice(1);
+  if(s.includes(',')) s=s.replace(/\./g,'').replace(',','.'); else if(/^\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,'');
+  if(!/^\d*\.?\d*$/.test(s)||s==='.') return NaN; let v=r2(parseFloat(s)||0)*sign; if(v<0&&!neg) return NaN; return v; }
+const xmlNum=n=>{ n=r2(n); const neg=n<0, c=Math.round(Math.abs(n)*100); return (neg?'-':'')+Math.floor(c/100)+','+String(c%100).padStart(2,'0'); };
+const itDate=iso=>iso?iso.split('-').reverse().join('/'):'';
+const todayIso=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)};
+const daysTo=iso=>Math.round((Date.parse(iso+'T00:00:00Z')-Date.parse(todayIso()+'T00:00:00Z'))/86400000);
+
+/* ---------- codice fiscale e partita IVA ---------- */
+function pivaOk(p){ p=String(p||''); if(!/^\d{11}$/.test(p)) return false; let s=0; for(let i=0;i<10;i++){ let d=+p[i]; if(i%2){ d*=2; if(d>9) d-=9; } s+=d; } return (10-s%10)%10===+p[10]; }
+function cf16Ok(cf){ cf=String(cf||'').toUpperCase(); if(!/^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/.test(cf)) return false;
+  const odd={0:1,1:0,2:5,3:7,4:9,5:13,6:15,7:17,8:19,9:21,A:1,B:0,C:5,D:7,E:9,F:13,G:15,H:17,I:19,J:21,K:2,L:4,M:18,N:20,O:11,P:3,Q:6,R:8,S:12,T:14,U:16,V:10,W:22,X:25,Y:24,Z:23};
+  let s=0; for(let i=0;i<15;i++){ const c=cf[i]; if(i%2===0) s+=odd[c]; else s+=/\d/.test(c)?+c:c.charCodeAt(0)-65; } return String.fromCharCode(65+s%26)===cf[15]; }
+const cfOk=cf=>{ cf=String(cf||'').toUpperCase(); return cf.length===11?pivaOk(cf):cf16Ok(cf); };
+
+/* ---------- stato ---------- */
+function blank(){ return {v:1,anno:ANNO,per:'M',trim:'opz',anag:{cf:'',piva:'',den:'',pivaContr:'',gruppo:false},
+  dich:{cf:'',carica:'',cfSoc:''},firma:true,int:{cf:'',imp:'1',data:'',firma:true},cred25:null,P:{},inv:{},ex:false}; }
+function example(){ const s=blank(); s.ex=true; s.per='M';
+  Object.assign(s.anag,{cf:'03123450904',piva:'03123450904',den:'ESEMPIO SERVIZI SRL'}); Object.assign(s.dich,{cf:'RSSMRA80A01I452B',carica:'1'});
+  s.cred25=2400;
+  const D={1:[48200,31500,10604,6930],2:[51000,22000,11220,4840],3:[39500,52000,8690,11440],4:[55300,30100,12166,6622],5:[61200,35400,13464,7788],6:[58900,41200,12958,9064],
+           7:[64000,38700,14080,8514],8:[22400,15800,4928,3476],9:[60300,36600,13266,8052],10:[57800,33900,12716,7458],11:[54100,36100,11902,7942],12:[69800,40500,15356,8910]};
+  Object.entries(D).forEach(([m,a])=>{ s.P['m'+m]={vp2:a[0],vp3:a[1],vp4:a[2],vp5:a[3]}; });
+  s.P.m1.vp9=1500; s.P.m12.met='1'; s.P.m12.vp13=5200; return s; }
+let S=load()||blank(), VIEW='FR', TRIM=0, DB=null, DL=null, ARCH=[], ARCH_STATE='attesa';
+function load(){ try{ const d=JSON.parse(localStorage.getItem('lipe26-draft')||'null'); return d&&d.P?fix(d):null }catch(e){ return null } }
+function fix(d){ const b=blank(); const s=Object.assign(b,d); s.anag=Object.assign(blank().anag,d.anag||{}); s.dich=Object.assign(blank().dich,d.dich||{}); s.int=Object.assign(blank().int,d.int||{}); s.P=d.P||{}; s.inv=d.inv||{}; return s; }
+let saveT=null; function draft(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{ localStorage.setItem('lipe26-draft',JSON.stringify(S)); }catch(e){} },250); }
+function changed(){ S.ex=false; draft(); }
+
+/* ---------- periodi ---------- */
+const keys=()=>S.per==='M'?Array.from({length:12},(_,i)=>'m'+(i+1)):['t1','t2','t3','t4'];
+const isM=k=>k[0]==='m', num=k=>+k.slice(1);
+const trimOf=k=>isM(k)?Math.ceil(num(k)/3):num(k);
+const keysOfTrim=q=>keys().filter(k=>trimOf(k)===q);
+const nomeP=k=>isM(k)?Cap(MESI[num(k)-1])+' '+ANNO:ROM[num(k)]+' trimestre '+ANNO;
+const isLast=k=>k==='m12'||k==='t4';
+const opzQ4=k=>k==='t4'&&S.trim==='opz';
+const FIELDS=['vp2','vp3','vp4','vp5','vp9','vp10','vp11','vp13'];
+function compiled(o){ return !!o&&(FIELDS.some(f=>o[f]!=null&&o[f]!=='')||!!o.sub||!!o.ev||!!o.ops||!!o.met||(o.ovr&&Object.keys(o.ovr).length>0)); }
+const P=k=>S.P[k]||(S.P[k]={});
+
+/* calcolo a catena di tutti i periodi dell'anno (VP6, VP7, VP8, VP12, VP14, versamenti) */
+function calc(){
+  const C={}; let prev=null, used9=0;
+  for(const k of keys()){
+    const o=S.P[k]||{}, ov=o.ovr||{}, c={k};
+    c.vp2=nz(o.vp2); c.vp3=nz(o.vp3); c.vp4=nz(o.vp4); c.vp5=nz(o.vp5);
+    const A=r2(c.vp4-c.vp5); c.vp6d=A>0?A:0; c.vp6c=A<0?-A:0;
+    c.a7=(prev&&!isLast(k)&&prev.vp14d>0&&prev.vp14d<=SOGLIA&&!prev.noVp14)?prev.vp14d:0;
+    c.vp7=ov.vp7!=null?ov.vp7:c.a7;
+    c.a8=prev?prev.vp14c:0; c.vp8=ov.vp8!=null?ov.vp8:c.a8;
+    c.vp9=nz(o.vp9); c.vp10=nz(o.vp10); c.vp11=nz(o.vp11); used9=r2(used9+c.vp9); c.used9=used9;
+    c.base12=r2(c.vp6d-c.vp6c+c.vp7-c.vp8-c.vp9-c.vp10-c.vp11);
+    const intOk=!isM(k)&&S.trim==='opz'&&(num(k)<4||!!o.sub);
+    c.intOk=intOk; c.a12=intOk&&c.base12>0?r2(c.base12*0.01):0; c.vp12=intOk?(ov.vp12!=null?ov.vp12:c.a12):0;
+    c.vp13=isLast(k)?nz(o.vp13):0; c.met=isLast(k)?(o.met||''):'';
+    c.noVp14=opzQ4(k)&&!o.sub;
+    const x=r2(c.vp6d+c.vp7+c.vp12-c.vp6c-c.vp8-c.vp9-c.vp10-c.vp11-c.vp13);
+    c.vp14d=x>0?x:0; c.vp14c=x<0?-x:0;
+    /* versamento */
+    c.cod=isM(k)?String(6000+num(k)):(num(k)<4?String(6030+num(k)):(S.trim==='opz'?'6099':'6034'));
+    c.scad=isM(k)?SCAD_M[num(k)]:(num(k)<4?SCAD_T[num(k)]:(S.trim==='opz'?SCAD_T4_ANN:SCAD_T[4]));
+    c.rinvio=c.vp14d>0&&c.vp14d<=SOGLIA&&!isLast(k)&&!(k==='m11'||k==='t3');
+    c.pay=c.noVp14||c.rinvio?0:c.vp14d;
+    if(c.vp14d>0&&c.vp14d<=SOGLIA&&k==='t3'){ c.scad=SCAD_RINVIO; c.nota='Importo non superiore a 100 euro: versamento entro il 16/12/'+ANNO+'.'; }
+    if(c.rinvio) c.nota='Importo non superiore a 100 euro: si riporta al periodo successivo (rigo VP7).';
+    if(c.noVp14) c.nota='IV trimestre dei trimestrali per opzione: il saldo si liquida nella dichiarazione IVA annuale (codice 6099, interessi 1% compresi).';
+    c.compiled=compiled(o)||!!(c.vp7||c.vp8||c.vp9);
+    C[k]=c; prev=c;
+  }
+  return C;
+}
+let C=calc();
+function acconto(){ const k=S.per==='M'?'m12':'t4', c=C[k]; return c&&c.vp13>0?{imp:c.vp13,cod:S.per==='M'?'6013':'6035',scad:SCAD_ACC,met:c.met}:null; }
+
+/* ---------- controlli di una comunicazione trimestrale ---------- */
+function moduliTrim(q){ return keysOfTrim(q).filter(k=>C[k].compiled); }
+function controlli(q){
+  const E=[],W=[],a=S.anag,d=S.dich,i=S.int, go=(v,t)=>`<a data-go="${v}">${t}</a>`;
+  const cf=String(a.cf||'').toUpperCase();
+  if(!cf) E.push('Codice fiscale del contribuente mancante. '+go('FR','Frontespizio'));
+  else if(!cfOk(cf)) E.push('Codice fiscale del contribuente non valido. '+go('FR','Frontespizio'));
+  if(!a.piva) E.push('Partita IVA mancante. '+go('FR','Frontespizio')); else if(!pivaOk(a.piva)) E.push('Partita IVA non valida (cifra di controllo). '+go('FR','Frontespizio'));
+  if(a.pivaContr&&!pivaOk(a.pivaContr)) E.push('Partita IVA della controllante non valida.');
+  if(a.pivaContr&&cf.length===16) E.push('La partita IVA della controllante non è ammessa per le persone fisiche.');
+  if(a.pivaContr&&a.gruppo) E.push('Liquidazione di gruppo e partita IVA della controllante sono alternative.');
+  if(cf.length===11&&!d.cf) E.push('Per i soggetti diversi dalle persone fisiche va indicato il dichiarante (codice fiscale e codice carica). '+go('FR','Frontespizio'));
+  if(d.cf&&!cf16Ok(d.cf)) E.push('Codice fiscale del dichiarante non valido: deve essere di 16 caratteri.');
+  if(d.cf&&!d.carica) E.push('Manca il codice carica del dichiarante.');
+  if(d.cfSoc&&!pivaOk(d.cfSoc)) E.push('Codice fiscale della società dichiarante non valido (11 cifre).');
+  if(!S.firma) W.push('La comunicazione non risulta firmata dal dichiarante.');
+  if(i.cf){ if(!cfOk(i.cf)) E.push('Codice fiscale dell’intermediario non valido.');
+    if(!i.data) E.push('Data dell’impegno alla presentazione telematica mancante.'); else if(i.data>todayIso()) E.push('La data dell’impegno non può essere successiva a oggi.');
+    if(!i.firma) W.push('Impegno alla presentazione non firmato dall’intermediario.'); }
+  const mods=moduliTrim(q);
+  if(!mods.length) E.push('Nessun dato per il '+ROM[q]+' trimestre: compila il quadro VP del periodo.');
+  if(mods.length>5) E.push('Più di cinque moduli nella stessa comunicazione.');
+  keysOfTrim(q).filter(k=>!mods.includes(k)).forEach(k=>W.push(nomeP(k)+' senza dati: il modulo non viene inviato.'));
+  mods.forEach(k=>{ const c=C[k],o=S.P[k]||{}, n=nomeP(k);
+    if(c.vp7>SOGLIA) E.push(n+': VP7 non può superare 100,00 euro.');
+    if(c.vp13>0&&c.vp13<ACC_MIN) E.push(n+': l’acconto (VP13) va indicato solo se non inferiore a 103,29 euro.');
+    if(c.vp13>0&&!c.met) E.push(n+': indicare il metodo di calcolo dell’acconto (VP13 colonna 1).');
+    if(c.vp12&&c.base12<=0) E.push(n+': interessi (VP12) indicati senza importo da versare.');
+    if(c.vp12>0&&c.a12&&Math.abs(c.vp12-c.a12)>0.01) W.push(n+': interessi VP12 diversi dall’1% calcolato ('+fmt(c.a12)+').');
+    if(o.ovr&&o.ovr.vp8!=null&&Math.abs(c.vp8-c.a8)>0.01) W.push(n+': VP8 diverso dal credito del periodo precedente ('+fmt(c.a8)+').');
+    if(c.vp9<0&&(k==='m1'||k==='t1')) E.push(n+': VP9 non può essere negativo nel primo periodo dell’anno.');
+    if(S.cred25!=null&&c.used9>S.cred25+0.005) W.push(n+': credito 2025 utilizzato (VP9) superiore al credito annuale indicato nel frontespizio.');
+    if(!o.vp4&&!o.vp5&&!o.vp2&&!o.vp3&&!c.vp7&&!c.vp8) W.push(n+': nessuna operazione indicata (VP2–VP5).');
+    if(S.anag.gruppo&&(o.vp2||o.vp3||o.sub||o.ops||o.vp10)) W.push(n+': con la liquidazione di gruppo non si indicano VP2, VP3, VP10, subfornitura e operazioni straordinarie (sono omessi dal file).');
+  });
+  const inv=S.inv[q]||{};
+  if(inv.um&&!(inv.um==='99'?q===4:[1,2,3].map(x=>String((q-1)*3+x)).includes(inv.um)||inv.um==='13')) W.push('Ultimo mese '+inv.um+' non coerente con il '+ROM[q]+' trimestre.');
+  return {E,W,mods};
+}
+
+/* ---------- file telematico IVP18 ---------- */
+function buildXml(q){
+  const a=S.anag,d=S.dich,i=S.int,inv=S.inv[q]||{},mods=moduliTrim(q),g=!!a.gruppo;
+  const L=[]; const el=(ind,n,v)=>L.push('  '.repeat(ind)+'<iv:'+n+'>'+esc(v)+'</iv:'+n+'>');
+  L.push('<?xml version="1.0" encoding="UTF-8"?>');
+  L.push('<iv:Fornitura xmlns:iv="'+NS+'" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">');
+  L.push('  <iv:Intestazione>'); el(2,'CodiceFornitura','IVP18');
+  if(d.cf){ el(2,'CodiceFiscaleDichiarante',d.cf.toUpperCase()); if(d.carica) el(2,'CodiceCarica',d.carica); }
+  L.push('  </iv:Intestazione>');
+  L.push('  <iv:Comunicazione identificativo="00001">');
+  L.push('    <iv:Frontespizio>');
+  el(3,'CodiceFiscale',String(a.cf).toUpperCase()); el(3,'AnnoImposta',String(S.anno)); el(3,'PartitaIVA',a.piva);
+  if(a.pivaContr) el(3,'PIVAControllante',a.pivaContr);
+  if(inv.um) el(3,'UltimoMese',inv.um);
+  if(g) el(3,'LiquidazioneGruppo','1');
+  if(d.cf){ el(3,'CFDichiarante',d.cf.toUpperCase()); if(d.carica) el(3,'CodiceCaricaDichiarante',d.carica); }
+  if(d.cfSoc) el(3,'CodiceFiscaleSocieta',d.cfSoc);
+  el(3,'FirmaDichiarazione',S.firma?'1':'0');
+  if(i.cf){ el(3,'CFIntermediario',i.cf.toUpperCase()); el(3,'ImpegnoPresentazione',i.imp||'1'); if(i.data) el(3,'DataImpegno',i.data.split('-').reverse().join('')); el(3,'FirmaIntermediario',i.firma?'1':'0'); }
+  if(inv.conf) el(3,'FlagConferma','1');
+  L.push('    </iv:Frontespizio>');
+  L.push('    <iv:DatiContabili>');
+  mods.forEach((k,ix)=>{ const c=C[k],o=S.P[k]||{};
+    L.push('      <iv:Modulo>'); const e=(n,v)=>el(4,n,v);
+    e('NumeroModulo',String(ix+1));
+    if(isM(k)) e('Mese',String(num(k))); else e('Trimestre',String(num(k)===4?(S.trim==='opz'?5:4):num(k)));
+    if(!g&&o.sub) e('Subfornitura','1');
+    if(o.ev) e('EventiEccezionali',o.ev);
+    if(!g&&o.ops) e('OperazioniStraordinarie','1');
+    if(!g){ e('TotaleOperazioniAttive',xmlNum(c.vp2)); e('TotaleOperazioniPassive',xmlNum(c.vp3)); }
+    e('IvaEsigibile',xmlNum(c.vp4)); e('IvaDetratta',xmlNum(c.vp5));
+    if(c.vp6d>0) e('IvaDovuta',xmlNum(c.vp6d)); if(c.vp6c>0) e('IvaCredito',xmlNum(c.vp6c));
+    if(c.vp7>0) e('DebitoPrecedente',xmlNum(c.vp7));
+    if(c.vp8>0) e('CreditoPeriodoPrecedente',xmlNum(c.vp8));
+    if(c.vp9) e('CreditoAnnoPrecedente',xmlNum(c.vp9));
+    if(!g&&c.vp10>0) e('VersamentiAutoUE',xmlNum(c.vp10));
+    if(c.vp11>0) e('CreditiImposta',xmlNum(c.vp11));
+    if(c.vp12>0) e('InteressiDovuti',xmlNum(c.vp12));
+    if(c.vp13>0){ if(c.met) e('Metodo',c.met); e('Acconto',xmlNum(c.vp13)); }
+    if(!c.noVp14){ if(c.vp14d>0) e('ImportoDaVersare',xmlNum(c.vp14d)); else if(c.vp14c>0) e('ImportoACredito',xmlNum(c.vp14c)); else e('ImportoDaVersare','0,00'); }
+    L.push('      </iv:Modulo>'); });
+  L.push('    </iv:DatiContabili>');
+  L.push('  </iv:Comunicazione>');
+  L.push('</iv:Fornitura>');
+  return L.join('\n')+'\n';
+}
+function fileName(q){ const cf=String(S.anag.cf||'CF').toUpperCase(); return 'IT'+cf+'_LI_'+String(ANNO).slice(2)+'T'+q+'1.xml'; }
+
+/* ---------- importazione di un file IVP18 ---------- */
+function importXml(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length) throw new Error('il file non è un XML valido');
+  const one=(p,n)=>{ const x=p.getElementsByTagNameNS('*',n)[0]; return x?x.textContent.trim():''; };
+  const F=doc.getElementsByTagNameNS('*','Frontespizio')[0]; if(!F) throw new Error('frontespizio della comunicazione non trovato');
+  const cf=one(F,'CodiceFiscale').toUpperCase(), anno=+one(F,'AnnoImposta')||ANNO;
+  if(anno!==ANNO) throw new Error('il file riguarda l’anno '+anno+': questa app gestisce le liquidazioni '+ANNO);
+  const mods=[...doc.getElementsByTagNameNS('*','Modulo')]; if(!mods.length) throw new Error('nessun modulo del quadro VP');
+  const monthly=mods.some(m=>one(m,'Mese'));
+  let s=(cf&&S.anag.cf&&cf===String(S.anag.cf).toUpperCase())?JSON.parse(JSON.stringify(S)):blank();
+  if(s.per!==(monthly?'M':'T')&&Object.keys(s.P).some(k=>compiled(s.P[k]))&&cf===String(S.anag.cf).toUpperCase()) s.P={};
+  s.per=monthly?'M':'T'; s.ex=false;
+  s.anag.cf=cf; s.anag.piva=one(F,'PartitaIVA'); s.anag.pivaContr=one(F,'PIVAControllante'); s.anag.gruppo=one(F,'LiquidazioneGruppo')==='1';
+  s.dich.cf=one(F,'CFDichiarante'); s.dich.carica=one(F,'CodiceCaricaDichiarante'); s.dich.cfSoc=one(F,'CodiceFiscaleSocieta');
+  s.firma=one(F,'FirmaDichiarazione')!=='0';
+  const ic=one(F,'CFIntermediario'); if(ic){ const dt=one(F,'DataImpegno'); s.int={cf:ic,imp:one(F,'ImpegnoPresentazione')||'1',data:dt.length===8?dt.slice(4)+'-'+dt.slice(2,4)+'-'+dt.slice(0,2):'',firma:one(F,'FirmaIntermediario')!=='0'}; }
+  const v=t=>{ if(!t) return null; const x=parseAmt(t,true); return isNaN(x)?null:x; };
+  let q=0;
+  mods.forEach(m=>{ const me=one(m,'Mese'), tr=one(m,'Trimestre');
+    const k=me?'m'+(+me):'t'+Math.min(4,+tr); if(!me&&+tr===4) s.trim='spec'; if(!me&&+tr===5) s.trim='opz';
+    q=me?Math.ceil(+me/3):Math.min(4,+tr);
+    const o={vp2:v(one(m,'TotaleOperazioniAttive')),vp3:v(one(m,'TotaleOperazioniPassive')),vp4:v(one(m,'IvaEsigibile')),vp5:v(one(m,'IvaDetratta')),
+      vp9:v(one(m,'CreditoAnnoPrecedente')),vp10:v(one(m,'VersamentiAutoUE')),vp11:v(one(m,'CreditiImposta')),vp13:v(one(m,'Acconto')),met:one(m,'Metodo')||'',
+      sub:one(m,'Subfornitura')==='1',ev:one(m,'EventiEccezionali')||'',ops:one(m,'OperazioniStraordinarie')==='1',ovr:{}};
+    ['vp7:DebitoPrecedente','vp8:CreditoPeriodoPrecedente','vp12:InteressiDovuti'].forEach(p=>{ const [f,n]=p.split(':'); const x=v(one(m,n)); if(x!=null) o.ovr[f]=x; });
+    s.P[k]=o; });
+  const um=one(F,'UltimoMese'), fc=one(F,'FlagConferma'); if(q) s.inv[q]=Object.assign({},s.inv[q]||{},{um,conf:fc==='1'});
+  S=fix(s); C=calc();
+  /* i valori di VP7, VP8 e VP12 uguali al calcolo automatico tornano automatici */
+  keys().forEach(k=>{ const o=S.P[k]; if(!o||!o.ovr) return; ['vp7','vp8','vp12'].forEach(f=>{ const a=C[k]['a'+f.slice(2)]; if(o.ovr[f]!=null&&Math.abs(o.ovr[f]-(a||0))<0.005) delete o.ovr[f]; }); });
+  C=calc(); changed(); return {cf,q,n:mods.length};
+}
+
+/* ---------- interfaccia ---------- */
+let toastT=null; function toast(m){ let t=$('.toast'); if(!t){ t=document.createElement('div'); t.className='toast'; t.setAttribute('role','status'); document.body.appendChild(t); } t.textContent=m; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,3800); }
+function confirmIn(btn,msg,fn){ const sp=document.createElement('span'); sp.className='confirm'; sp.innerHTML=`<span>${esc(msg)}</span><button type="button" class="btn sm danger">Conferma</button><button type="button" class="btn sm">Annulla</button>`;
+  btn.replaceWith(sp); const [ok,no]=sp.querySelectorAll('button'); ok.focus(); ok.onclick=()=>{ sp.replaceWith(btn); fn(); }; no.onclick=()=>sp.replaceWith(btn); }
+const den=()=>S.anag.den||'—';
+function recalc(){ C=calc(); renderSum(); renderNavDots(); $('#hdrName').textContent=(S.anag.den||'Nuova comunicazione')+(S.anag.cf?' · '+String(S.anag.cf).toUpperCase():''); }
+
+function renderNav(){
+  const n=$('#nav'); let h=`<h4>Comunicazione</h4><button type="button" data-v="FR"><span class="code">FR</span><span class="lbl">Frontespizio</span><span class="dot" data-dot="FR"></span></button>`;
+  for(let q=1;q<=4;q++){
+    h+=`<h4>${ROM[q]} trimestre<small>invio entro ${itDate(INVIO[q])}</small></h4>`;
+    keysOfTrim(q).forEach(k=>{ h+=`<button type="button" data-v="${k}"><span class="code">${isM(k)?String(num(k)).padStart(2,'0'):'T'+num(k)}</span><span class="lbl">${isM(k)?Cap(MESI[num(k)-1]):ROM[num(k)]+' trimestre'}</span><span class="dot" data-dot="${k}"></span></button>`; });
+  }
+  h+=`<h4>Riepiloghi</h4>
+   <button type="button" data-v="RIE"><span class="code">Σ</span><span class="lbl">Riepilogo annuale</span></button>
+   <button type="button" data-v="VER"><span class="code">F24</span><span class="lbl">Versamenti</span></button>
+   <button type="button" data-v="INV"><span class="code">XML</span><span class="lbl">Invio telematico</span></button>
+   <button type="button" data-v="ARC"><span class="code">ARC</span><span class="lbl">Archivio</span></button>`;
+  n.innerHTML=h; renderNavDots();
+}
+function renderNavDots(){
+  document.querySelectorAll('#nav [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===VIEW));
+  document.querySelectorAll('#nav [data-dot]').forEach(d=>{ const k=d.dataset.dot;
+    if(k==='FR'){ const ok=cfOk(S.anag.cf)&&pivaOk(S.anag.piva); d.className='dot'+(ok?' c':(S.anag.cf||S.anag.piva?' e':'')); return; }
+    const c=C[k]; d.className='dot'+(c&&c.compiled?(c.vp7>SOGLIA||(c.vp13>0&&(c.vp13<ACC_MIN||!c.met))?' e':' c'):''); });
+}
+function go(v){ VIEW=v; if(/^[mt]\d/.test(v)) TRIM=trimOf(v); renderMain(); renderNavDots(); renderSum(); try{ window.scrollTo({top:0}); }catch(e){} }
+
+function renderMain(){
+  const m=$('#main');
+  if(VIEW==='FR') return renderFront(m);
+  if(VIEW==='RIE') return renderRie(m);
+  if(VIEW==='VER') return renderVer(m);
+  if(VIEW==='INV') return renderInv(m);
+  if(VIEW==='ARC') return renderArc(m);
+  if(!C[VIEW]){ VIEW='FR'; return renderFront(m); }
+  renderPeriod(m,VIEW);
+}
+
+/* frontespizio */
+function renderFront(m){
+  const a=S.anag,d=S.dich,i=S.int, cf=String(a.cf||'').toUpperCase(), any=keys().some(k=>compiled(S.P[k]));
+  m.innerHTML=`<div class="bar"><h2>Frontespizio<span class="sub">Contribuente, periodicità, dichiarante e impegno alla presentazione telematica</span></h2>
+    <div class="tools">${!any&&!a.cf?'<button type="button" class="btn sm" id="bEx">Carica un esempio</button>':''}</div></div>
+  ${S.ex?'<div class="banner">Dati di esempio: modificali o premi “Nuova” per iniziare una comunicazione vuota.</div>':''}
+  <div class="card"><h3>Contribuente</h3><p class="hint">Anno d’imposta ${ANNO}. Codice fiscale e partita IVA sono controllati con la cifra di controllo.</p>
+    <div class="form">
+      <label>Codice fiscale<input data-f="anag.cf" value="${esc(a.cf)}" maxlength="16" autocomplete="off" class="${a.cf&&!cfOk(a.cf)?'bad':''}"></label>
+      <label>Partita IVA<input data-f="anag.piva" value="${esc(a.piva)}" maxlength="11" inputmode="numeric" class="${a.piva&&!pivaOk(a.piva)?'bad':''}"></label>
+      <label class="wide">Denominazione o cognome e nome<input data-f="anag.den" value="${esc(a.den)}"></label>
+    </div></div>
+  <div class="card"><h3>Liquidazioni</h3><p class="hint">La periodicità determina i moduli del quadro VP: tre mesi per ogni comunicazione oppure un trimestre.</p>
+    <div class="form">
+      <label>Periodicità<span class="seg" role="group" aria-label="Periodicità">
+        <button type="button" data-per="M" aria-pressed="${S.per==='M'}">Mensile</button><button type="button" data-per="T" aria-pressed="${S.per==='T'}">Trimestrale</button></span></label>
+      ${S.per==='T'?`<label>Contribuente trimestrale<select data-f="trim">
+        <option value="opz"${S.trim==='opz'?' selected':''}>Per opzione (art. 7 DPR 542/1999) – interessi 1%</option>
+        <option value="spec"${S.trim==='spec'?' selected':''}>Speciale (art. 74, c. 4) – senza interessi</option></select></label>`:''}
+      <label>Credito IVA annuale 2025 disponibile<input data-f="cred25" data-amt="1" value="${fmt(S.cred25)}" inputmode="decimal" placeholder="dalla dichiarazione IVA 2026"></label>
+    </div>
+    ${S.per==='T'?`<p class="hint" style="margin:10px 0 0">${S.trim==='opz'?'IV trimestre: codice 5 nel rigo VP1; il saldo con gli interessi si versa con la dichiarazione annuale (6099) e il rigo VP14 non si compila.':'IV trimestre: codice 4 nel rigo VP1; versamento con il codice 6034 entro il 16/02/2027.'}</p>`:''}</div>
+  <div class="card"><h3>Liquidazione IVA di gruppo</h3><p class="hint">Da compilare solo per le società che partecipano alla liquidazione IVA di gruppo (art. 73 DPR 633/1972).</p>
+    <div class="form">
+      <label>Partita IVA della controllante<input data-f="anag.pivaContr" value="${esc(a.pivaContr)}" maxlength="11" inputmode="numeric" placeholder="se la società è controllata" class="${a.pivaContr&&!pivaOk(a.pivaContr)?'bad':''}"></label>
+      <label class="chk"><input type="checkbox" data-f="anag.gruppo"${a.gruppo?' checked':''}> Liquidazione di gruppo (comunicazione della controllante)</label>
+    </div></div>
+  <div class="card"><h3>Dichiarante diverso dal contribuente</h3><p class="hint">${cf.length===11?'Obbligatorio per società ed enti: chi firma la comunicazione (rappresentante legale o altro soggetto).':'Da compilare solo se la comunicazione è firmata da un soggetto diverso dal contribuente.'}</p>
+    <div class="form">
+      <label>Codice fiscale del dichiarante<input data-f="dich.cf" value="${esc(d.cf)}" maxlength="16" class="${d.cf&&!cf16Ok(d.cf)?'bad':''}"></label>
+      <label>Codice carica<select data-f="dich.carica"><option value="">—</option>${CARICHE.map(([v,t])=>`<option value="${v}"${d.carica===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>
+      <label>Codice fiscale della società dichiarante<input data-f="dich.cfSoc" value="${esc(d.cfSoc)}" maxlength="11" inputmode="numeric" placeholder="solo se il dichiarante è una società"></label>
+      <label class="chk wide"><input type="checkbox" data-f="firma"${S.firma?' checked':''}> Comunicazione firmata dal dichiarante</label>
+    </div></div>
+  <div class="card"><h3>Impegno alla presentazione telematica</h3><p class="hint">Da compilare quando la comunicazione è trasmessa da un intermediario abilitato.</p>
+    <div class="form">
+      <label>Codice fiscale dell’intermediario<input data-f="int.cf" value="${esc(i.cf)}" maxlength="16" class="${i.cf&&!cfOk(i.cf)?'bad':''}"></label>
+      <label>Impegno<select data-f="int.imp"><option value="1"${i.imp==='1'?' selected':''}>1 – Comunicazione predisposta dal contribuente</option><option value="2"${i.imp==='2'?' selected':''}>2 – Comunicazione predisposta da chi la trasmette</option></select></label>
+      <label>Data dell’impegno<input type="date" data-f="int.data" value="${esc(i.data)}" max="${todayIso()}"></label>
+      <label class="chk"><input type="checkbox" data-f="int.firma"${i.firma?' checked':''}> Firma dell’intermediario</label>
+    </div>
+    ${i.cf?'':`<p class="hint" style="margin:10px 0 0"><button type="button" class="btn sm" id="bLastInt">Usa l’ultimo intermediario indicato</button></p>`}</div>`;
+  const ex=$('#bEx'); if(ex) ex.onclick=()=>{ S=example(); C=calc(); draft(); renderNav(); recalc(); go('m1'); toast('Esempio caricato: liquidazioni mensili 2026.'); };
+  const li=$('#bLastInt'); if(li) li.onclick=()=>{ try{ const x=JSON.parse(localStorage.getItem('lipe26-int')||'null'); if(x&&x.cf){ S.int=Object.assign(S.int,x,{data:todayIso()}); changed(); renderFront(m); toast('Intermediario '+x.cf+' inserito.'); } else toast('Nessun intermediario memorizzato.'); }catch(e){} };
+}
+function setPath(p,v){ const ks=p.split('.'); let o=S; for(let i=0;i<ks.length-1;i++) o=o[ks[i]]; o[ks[ks.length-1]]=v; }
+
+/* quadro VP di un periodo */
+function inp(k,f,neg,cls){ const o=S.P[k]||{}; const v=o[f]; return `<input class="num${cls?' '+cls:''}" data-k="${k}" data-p="${f}"${neg?' data-neg="1"':''} value="${fmt(v)}" inputmode="decimal" autocomplete="off" aria-label="${f.toUpperCase()}">`; }
+function autoInp(k,f){ const o=S.P[k]||{}, c=C[k], ov=o.ovr&&o.ovr[f]!=null; const val=ov?o.ovr[f]:c[f];
+  return `<input class="num ${ov?'ovr':'auto'}" data-k="${k}" data-o="${f}" value="${fmt(val)}" inputmode="decimal" autocomplete="off" title="${ov?'Valore modificato a mano':'Calcolato automaticamente: puoi modificarlo'}" aria-label="${f.toUpperCase()}">${ov?`<br><button type="button" class="rst" data-rst="${k}:${f}">torna al calcolo (${fmt(c['a'+f.slice(2)])})</button>`:''}`; }
+const cv=(n,id)=>`<span class="calcv${n?'':' z'}" data-c="${id}">${fmt(n)}</span>`;
+function renderPeriod(m,k){
+  const c=C[k],o=S.P[k]||{}, q=trimOf(k), mese=isM(k);
+  const tcode=mese?'':(num(k)===4?(S.trim==='opz'?'5':'4'):String(num(k)));
+  const scadTxt=c.noVp14?'saldo nella dichiarazione annuale (6099)':'versamento entro il '+itDate(c.scad)+' · codice '+c.cod;
+  m.innerHTML=`<div class="bar"><h2>${esc(nomeP(k))} — quadro VP<span class="sub">${mese?'Liquidazione mensile':'Liquidazione trimestrale'+(S.trim==='opz'?' per opzione':' speciale')} · ${scadTxt} · comunicazione del ${ROM[q]} trimestre entro il ${itDate(INVIO[q])}</span></h2>
+    <div class="tools">${window.SUITE_PARENT?`<button type="button" class="btn sm pri" data-suite-f24 data-lipe-sel="${k}"${c.pay>0?'':' disabled'}>Compila il Modello F24</button>`:''}
+      <button type="button" class="btn sm" id="bClr">Cancella dati del periodo</button></div></div>
+  <div class="esito" data-c="esito"></div>
+  <table class="vp"><thead><tr><th>Rigo</th><th>Descrizione</th><th class="n">Debiti</th><th class="n">Crediti</th></tr></thead><tbody>
+  <tr><td class="code">VP1</td><td class="d" colspan="3">Periodo di riferimento: <b>${mese?'mese '+num(k):'trimestre '+tcode}</b>
+     <div class="inl" style="margin-top:6px">
+      <label><input type="checkbox" data-k="${k}" data-b="sub"${o.sub?' checked':''}> Subfornitori (art. 74, c. 5)</label>
+      <label>Eventi eccezionali <select data-k="${k}" data-s="ev"><option value="">—</option><option value="1"${o.ev==='1'?' selected':''}>1 – vittime di richieste estorsive</option><option value="9"${o.ev==='9'?' selected':''}>9 – altri eventi eccezionali</option></select></label>
+      <label><input type="checkbox" data-k="${k}" data-b="ops"${o.ops?' checked':''}> Operazioni straordinarie</label></div></td></tr>
+  <tr><td class="code">VP2</td><td class="d">Totale operazioni attive<small>al netto dell’IVA</small></td><td class="n">${inp(k,'vp2',true)}</td><td class="n"></td></tr>
+  <tr><td class="code">VP3</td><td class="d">Totale operazioni passive<small>al netto dell’IVA</small></td><td class="n"></td><td class="n">${inp(k,'vp3',true)}</td></tr>
+  <tr><td class="code">VP4</td><td class="d">IVA esigibile</td><td class="n">${inp(k,'vp4',true)}</td><td class="n"></td></tr>
+  <tr><td class="code">VP5</td><td class="d">IVA detratta</td><td class="n"></td><td class="n">${inp(k,'vp5',true)}</td></tr>
+  <tr class="tot"><td class="code">VP6</td><td class="d">IVA dovuta o a credito<small>VP4 meno VP5</small></td><td class="n">${cv(c.vp6d,'vp6d')}</td><td class="n">${cv(c.vp6c,'vp6c')}</td></tr>
+  <tr><td class="code">VP7</td><td class="d">Debito del periodo precedente non superiore a 100 euro<small>${isLast(k)?'Non riportato: gli importi fino a 100 euro di novembre e del III trimestre si versano entro il 16 dicembre':'Riportato in automatico dal rigo VP14 del periodo precedente'}</small></td><td class="n">${autoInp(k,'vp7')}</td><td class="n"></td></tr>
+  <tr><td class="code">VP8</td><td class="d">Credito del periodo precedente<small>Dal rigo VP14, colonna 2, del periodo precedente</small></td><td class="n"></td><td class="n">${autoInp(k,'vp8')}</td></tr>
+  <tr><td class="code">VP9</td><td class="d">Credito dell’anno precedente<small>Credito IVA 2025 utilizzato nel periodo${S.cred25!=null?' · residuo dopo questo periodo: '+fmt(r2(S.cred25-c.used9)):''}</small></td><td class="n"></td><td class="n">${inp(k,'vp9',true)}</td></tr>
+  <tr><td class="code">VP10</td><td class="d">Versamenti auto UE<small>F24 “elementi identificativi” per la prima cessione interna di auto UE</small></td><td class="n"></td><td class="n">${inp(k,'vp10')}</td></tr>
+  <tr><td class="code">VP11</td><td class="d">Crediti d’imposta<small>Utilizzati a scomputo, esclusi quelli compensati nel modello F24</small></td><td class="n"></td><td class="n">${inp(k,'vp11')}</td></tr>
+  <tr><td class="code">VP12</td><td class="d">Interessi dovuti per le liquidazioni trimestrali<small>${c.intOk?'1% dell’importo dovuto (base '+fmt(c.base12)+')':(mese?'Non dovuti per le liquidazioni mensili':(S.trim==='spec'?'Non dovuti dai trimestrali speciali':'IV trimestre: interessi versati con la dichiarazione annuale'))}</small></td><td class="n">${c.intOk?autoInp(k,'vp12'):cv(0,'vp12')}</td><td class="n"></td></tr>
+  <tr><td class="code">VP13</td><td class="d">Acconto dovuto${isLast(k)?`<div class="inl" style="margin-top:6px"><label>Metodo <select data-k="${k}" data-s="met"><option value="">—</option>${METODI.map(([v,t])=>`<option value="${v}"${o.met===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label></div>
+       <div class="inl" style="margin-top:6px"><label>Base di calcolo <input class="num" id="accBase" inputmode="decimal" placeholder="es. IVA di dicembre 2025"></label><button type="button" class="btn sm" id="accCalc">Applica 88%</button></div><small>Minimo 103,29 euro; versamento entro il ${itDate(SCAD_ACC)} (codice ${S.per==='M'?'6013':'6035'})</small>`:'<small>Solo nella liquidazione di dicembre o del IV trimestre</small>'}</td><td class="n"></td><td class="n">${isLast(k)?inp(k,'vp13'):cv(0,'vp13')}</td></tr>
+  <tr class="tot"><td class="code">VP14</td><td class="d">IVA da versare o a credito<small>${c.noVp14?'Non compilato: IV trimestre dei trimestrali per opzione':'(VP6/1 + VP7 + VP12) − (VP6/2 + VP8 + VP9 + VP10 + VP11 + VP13)'}</small></td><td class="n">${cv(c.noVp14?0:c.vp14d,'vp14d')}</td><td class="n">${cv(c.noVp14?0:c.vp14c,'vp14c')}</td></tr>
+  </tbody></table>
+  <div class="legend"><span><i style="background:var(--auto)"></i>Calcolato in automatico, modificabile</span><span><i style="background:var(--calc)"></i>Calcolato</span><span><i style="border:1px dashed var(--warn)"></i>Modificato a mano</span></div>`;
+  updEsito(k);
+  $('#bClr').onclick=e=>confirmIn(e.currentTarget,'Cancellare tutti i dati di '+nomeP(k)+'?',()=>{ delete S.P[k]; changed(); recalc(); renderMain(); toast(nomeP(k)+': dati cancellati.'); });
+  const ac=$('#accCalc'); if(ac) ac.onclick=()=>{ const b=parseAmt($('#accBase').value); if(!b||isNaN(b)){ toast('Indica la base di calcolo dell’acconto.'); return; } const v=r2(b*0.88); const o=P(k); o.vp13=v>=ACC_MIN?v:null; if(!o.met) o.met='1'; changed(); recalc(); renderMain(); toast(v>=ACC_MIN?'Acconto: '+fmt(v)+' euro (88%).':'Acconto inferiore a 103,29 euro: non dovuto.'); };
+}
+function updEsito(k){ const e=document.querySelector('[data-c="esito"]'); if(!e) return; const c=C[k];
+  e.innerHTML=c.noVp14?`<span>Saldo del IV trimestre nella dichiarazione IVA annuale</span>`:
+    `<span>Risultato: ${c.vp14d>0?'IVA da versare <b>'+fmt(c.vp14d)+'</b>':(c.vp14c>0?'IVA a credito <b>'+fmt(c.vp14c)+'</b>':'<b>0,00</b>')}</span>`+
+    (c.pay>0?`<span>Versamento: <b>${fmt(c.pay)}</b> codice <b>${c.cod}</b> entro il <b>${itDate(c.scad)}</b></span>`:'')+(c.nota?`<span class="muted">${esc(c.nota)}</span>`:'');
+}
+function refreshCalc(k){ const c=C[k]; if(!c) return;
+  const set=(id,v)=>{ const el=document.querySelector(`[data-c="${id}"]`); if(el){ el.textContent=fmt(v); el.classList.toggle('z',!v); } };
+  set('vp6d',c.vp6d); set('vp6c',c.vp6c); set('vp14d',c.noVp14?0:c.vp14d); set('vp14c',c.noVp14?0:c.vp14c);
+  ['vp7','vp8','vp12'].forEach(f=>{ const el=document.querySelector(`input[data-o="${f}"]`); if(el&&document.activeElement!==el&&!el.classList.contains('ovr')) el.value=fmt(c[f]); });
+  updEsito(k); const fb=document.querySelector('[data-lipe-sel]'); if(fb) fb.disabled=!(c.pay>0);
+}
+
+/* riepilogo annuale */
+function renderRie(m){
+  const ks=keys(), R=[['VP2','Operazioni attive','vp2'],['VP3','Operazioni passive','vp3'],['VP4','IVA esigibile','vp4'],['VP5','IVA detratta','vp5'],['VP6/1','IVA dovuta','vp6d'],['VP6/2','IVA a credito','vp6c'],['VP7','Debito periodo prec.','vp7'],['VP8','Credito periodo prec.','vp8'],['VP9','Credito anno prec.','vp9'],['VP10','Versamenti auto UE','vp10'],['VP11','Crediti d’imposta','vp11'],['VP12','Interessi','vp12'],['VP13','Acconto','vp13'],['VP14/1','IVA da versare','vp14d'],['VP14/2','IVA a credito','vp14c']];
+  const lab=k=>isM(k)?Cap(MESI[num(k)-1]).slice(0,3):'T'+num(k);
+  const sumable=new Set(['vp2','vp3','vp4','vp5','vp6d','vp6c','vp9','vp10','vp11','vp12','vp13']);
+  m.innerHTML=`<div class="bar"><h2>Riepilogo annuale ${ANNO}<span class="sub">Quadro VP di tutti i periodi; i totali sono indicati solo per le grandezze che si sommano</span></h2></div>
+  <div class="card tw"><table class="t"><thead><tr><th>Rigo</th>${ks.map(k=>`<th class="n"><a data-go="${k}" style="cursor:pointer">${lab(k)}</a></th>`).join('')}<th class="n">Totale</th></tr></thead><tbody>
+  ${R.map(([c,t,f])=>`<tr${f.startsWith('vp14')?' class="sub"':''}><td title="${esc(t)}"><b>${c}</b> <span class="muted">${esc(t)}</span></td>${ks.map(k=>`<td class="n">${fmt(f.startsWith('vp14')&&C[k].noVp14?0:C[k][f],true)}</td>`).join('')}<td class="n">${sumable.has(f)?fmt(ks.reduce((s,k)=>s+C[k][f],0),true):''}</td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="card"><h3>Comunicazioni trimestrali</h3><div class="tw"><table class="t"><thead><tr><th>Trimestre</th><th>Moduli</th><th>Invio entro</th><th>Esito controlli</th><th>Stato</th></tr></thead><tbody>
+  ${[1,2,3,4].map(q=>{ const r=controlli(q), inv=S.inv[q]||{}; return `<tr><td><a data-tri="${q}" style="cursor:pointer;color:var(--acc);text-decoration:underline">${ROM[q]} trimestre</a></td><td>${r.mods.map(k=>esc(isM(k)?Cap(MESI[num(k)-1]):'trimestre')).join(', ')||'—'}</td><td class="n">${itDate(INVIO[q])}</td>
+    <td>${r.mods.length?(r.E.length?`<span class="pill err">${r.E.length} ${r.E.length===1?'errore':'errori'}</span>`:(r.W.length?`<span class="pill warn">${r.W.length} ${r.W.length===1?'avviso':'avvisi'}</span>`:'<span class="pill ok">Nessun errore</span>')):'<span class="pill mut">Nessun dato</span>'}</td>
+    <td>${inv.inviata?`<span class="pill ok">Inviata il ${itDate(inv.inviata)}</span>`:(r.mods.length?(daysTo(INVIO[q])<0?'<span class="pill err">Da inviare (scaduta)</span>':'<span class="pill warn">Da inviare</span>'):'—')}</td></tr>`; }).join('')}
+  </tbody></table></div></div>`;
+}
+
+/* versamenti */
+function rowsVers(){ const out=[]; keys().forEach(k=>{ const c=C[k]; if(!c.compiled) return; out.push({k,c}); }); return out; }
+function renderVer(m){
+  const rs=rowsVers(), acc=acconto(), suite=!!window.SUITE_PARENT;
+  const tot=r2(rs.reduce((s,x)=>s+x.c.pay,0)+(acc?acc.imp:0));
+  m.innerHTML=`<div class="bar"><h2>Versamenti F24 ${ANNO}<span class="sub">Sezione Erario, anno di riferimento ${ANNO}; gli importi fino a 100 euro si riportano al periodo successivo</span></h2></div>
+  ${rs.length?`<div class="card tw"><table class="t"><thead><tr><th>Periodo</th><th class="n">VP14 da versare</th><th>Codice</th><th class="n">Importo F24</th><th class="n">Scadenza</th><th>Versato</th><th>Note</th>${suite?'<th></th>':''}</tr></thead><tbody>
+  ${rs.map(({k,c})=>{ const vs=!!(S.P[k]||{}).versato, late=c.pay>0&&!vs&&daysTo(c.scad)<0; return `<tr><td><a data-go="${k}" style="cursor:pointer;color:var(--acc);text-decoration:underline">${esc(nomeP(k))}</a></td><td class="n">${fmt(c.noVp14?0:c.vp14d,true)||(c.vp14c?'<span class="muted">credito '+fmt(c.vp14c)+'</span>':'—')}</td>
+    <td class="code">${c.pay>0||c.noVp14?c.cod:''}</td><td class="n"><b>${fmt(c.pay,true)}</b></td><td class="n">${c.pay>0||c.noVp14?itDate(c.scad):''}${late?' <span class="pill err">scaduto</span>':''}</td><td>${c.pay>0?`<label class="chk" style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-vers="${k}"${vs?' checked':''}> ${vs?'<span class="pill ok">versato</span>':''}</label>`:''}</td><td class="muted" style="font-size:12.5px">${esc(c.nota||'')}</td>
+    ${suite?`<td>${c.pay>0?`<button type="button" class="btn sm pri" data-suite-f24 data-lipe-sel="${k}">F24</button>`:''}</td>`:''}</tr>`; }).join('')}
+  ${acc?`<tr><td>Acconto IVA ${ANNO} (metodo ${esc(acc.met||'—')})</td><td class="n"></td><td class="code">${acc.cod}</td><td class="n"><b>${fmt(acc.imp)}</b></td><td class="n">${itDate(acc.scad)}${!S.accVers&&daysTo(acc.scad)<0?' <span class="pill err">scaduto</span>':''}</td><td><label style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-vers="acc"${S.accVers?' checked':''}> ${S.accVers?'<span class="pill ok">versato</span>':''}</label></td><td class="muted" style="font-size:12.5px">Rigo VP13 di ${S.per==='M'?'dicembre':'IV trimestre'}</td>${suite?`<td><button type="button" class="btn sm pri" data-suite-f24 data-lipe-sel="acc">F24</button></td>`:''}</tr>`:''}
+  <tr class="sub"><td>Totale versamenti ${ANNO}</td><td></td><td></td><td class="n">${fmt(tot)}</td><td></td><td></td><td></td>${suite?'<td></td>':''}</tr></tbody></table></div>
+  <p class="muted" style="font-size:12.5px">Versamenti tardivi: il Modello F24 della suite propone il ravvedimento operoso con i codici 8904 (sanzione) e 1991 (interessi). ${S.per==='T'&&S.trim==='opz'?'Per i trimestrali per opzione gli interessi dell’1% sono compresi nell’importo del codice tributo.':''}</p>`
+  :'<div class="empty">Nessun periodo compilato. Inserisci i dati del quadro VP nei mesi o nei trimestri.</div>'}`;
+}
+
+/* invio telematico */
+function renderInv(m){
+  if(!TRIM){ const t=todayIso(); TRIM=[1,2,3,4].find(q=>INVIO[q]>=t&&moduliTrim(q).length)||[1,2,3,4].find(q=>moduliTrim(q).length)||1; }
+  const q=TRIM, r=controlli(q), inv=S.inv[q]||(S.inv[q]={}), ok=!r.E.length&&r.mods.length;
+  const ums=q===4?['10','11','12','13','99']:[1,2,3].map(x=>String((q-1)*3+x)).concat(['13']);
+  m.innerHTML=`<div class="bar"><h2>Invio telematico — ${ROM[q]} trimestre ${ANNO}<span class="sub">Fornitura IVP18 · invio entro il ${itDate(INVIO[q])} · ${daysTo(INVIO[q])>=0?'tra '+daysTo(INVIO[q])+' giorni':'scaduto da '+(-daysTo(INVIO[q]))+' giorni'}</span></h2></div>
+  <div class="chips" role="group" aria-label="Trimestre">${[1,2,3,4].map(x=>`<button type="button" class="chip" data-tri="${x}" aria-pressed="${x===q}">${ROM[x]} trimestre</button>`).join('')}</div>
+  <div class="grid2">
+   <div class="card"><h3>Controlli</h3><p class="hint">Moduli inclusi: ${r.mods.map(k=>esc(nomeP(k))).join(', ')||'nessuno'}.</p>
+    <ul class="ctrl">${r.E.map(x=>`<li class="e">${x}</li>`).join('')}${r.W.map(x=>`<li class="w">${x}</li>`).join('')}${!r.E.length&&!r.W.length&&r.mods.length?'<li class="o">Nessun errore: il file può essere generato.</li>':''}</ul></div>
+   <div class="card"><h3>Dati dell’invio</h3><div class="form">
+     <label>Ultimo mese (operazioni straordinarie)<select data-inv="um"><option value="">—</option>${ums.map(u=>`<option value="${u}"${inv.um===u?' selected':''}>${u==='13'?'13 – nessuna liquidazione nel trimestre':u==='99'?'99 – liquidazione dell’ultimo periodo nella dichiarazione':'mese '+u}</option>`).join('')}</select></label>
+     <label class="chk"><input type="checkbox" data-inv="conf"${inv.conf?' checked':''}> Flag conferma (dati confermati nonostante gli avvisi)</label>
+     <label>Data di invio<input type="date" data-inv="inviata" value="${esc(inv.inviata||'')}"></label>
+     <label>Protocollo telematico<input data-inv="prot" value="${esc(inv.prot||'')}" placeholder="ricevuta dell’Agenzia"></label></div>
+     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+       <button type="button" class="btn pri" id="bXml"${ok?'':' disabled'}>Scarica il file XML</button>
+       <button type="button" class="btn" id="bPdf2"${r.mods.length?'':' disabled'}>Stampa PDF</button></div>
+     <p class="hint" style="margin:10px 0 0">File <b>${esc(fileName(q))}</b>: trasmettilo con il servizio “Fatture e Corrispettivi” (Comunicazioni liquidazioni periodiche IVA) o, firmato, con Entratel.</p></div>
+  </div>
+  <div class="card"><h3>Anteprima del file</h3>${r.mods.length?`<pre class="xml">${esc(buildXml(q))}</pre>`:'<div class="empty">Nessun modulo da inviare per il trimestre.</div>'}</div>`;
+  const bx=$('#bXml'); if(bx) bx.onclick=()=>{ saveFile(fileName(q),new Blob([buildXml(q)],{type:'application/xml'})); try{ if(S.int.cf) localStorage.setItem('lipe26-int',JSON.stringify({cf:S.int.cf,imp:S.int.imp,firma:S.int.firma})); }catch(e){} };
+  const bp=$('#bPdf2'); if(bp) bp.onclick=()=>stampa(q);
+}
+
+/* archivio */
+const docId=()=>(String(S.anag.cf||'').toUpperCase()+'_'+ANNO).replace(/[^A-Z0-9_]/g,'');
+async function salva(){
+  if(!cfOk(S.anag.cf)){ toast('Indica un codice fiscale valido prima di salvare.'); go('FR'); return; }
+  const rec={cf:String(S.anag.cf).toUpperCase(),ragione:S.anag.den||'',anno:ANNO,per:S.per,updated:Date.now(),json:JSON.stringify(Object.assign({},S,{ex:false}))};
+  if(DB){ try{ await DB.collection('dichiarazioni').doc(docId()).set(rec); toast('Comunicazione salvata in archivio.'); loadArchive(); return; }catch(e){ toast('Archivio non raggiungibile: salvata su questo dispositivo.'); } }
+  try{ const loc=JSON.parse(localStorage.getItem('lipe26-arch')||'{}'); loc[docId()]=rec; localStorage.setItem('lipe26-arch',JSON.stringify(loc)); if(!DB) toast('Comunicazione salvata su questo dispositivo.'); }catch(e){ toast('Salvataggio non riuscito.'); }
+  loadArchive();
+}
+async function loadArchive(){
+  let list=[]; if(DB){ try{ const snap=await DB.collection('dichiarazioni').get(); list=snap.docs.map(d=>Object.assign({id:d.id,src:'db'},d.data())); ARCH_STATE='ok'; }catch(e){ ARCH_STATE='errore'; } }
+  try{ const loc=JSON.parse(localStorage.getItem('lipe26-arch')||'{}'); Object.entries(loc).forEach(([id,r])=>{ if(!list.some(x=>x.id===id)) list.push(Object.assign({id,src:'loc'},r)); }); }catch(e){}
+  ARCH=list.sort((a,b)=>(b.updated||0)-(a.updated||0)); if(VIEW==='ARC') renderArc($('#main'));
+}
+function openRec(r){ try{ S=fix(JSON.parse(r.json)); C=calc(); draft(); renderNav(); recalc(); go('FR'); toast('Aperta: '+(r.ragione||r.cf)+'.'); }catch(e){ toast('Comunicazione non leggibile.'); } }
+function renderArc(m){
+  m.innerHTML=`<div class="bar"><h2>Archivio<span class="sub">${DB?'Archivio condiviso della pagina pubblicata':'Archivio di questo browser'} · una scheda per contribuente e anno</span></h2>
+    <div class="tools"><button type="button" class="btn sm" id="bExp">Esporta JSON della comunicazione aperta</button></div></div>
+  ${ARCH.length?`<div class="card tw"><table class="t"><thead><tr><th>Contribuente</th><th>Codice fiscale</th><th>Periodicità</th><th>Aggiornata</th><th></th></tr></thead><tbody>
+  ${ARCH.map((r,i)=>`<tr><td>${esc(r.ragione||'—')}</td><td class="code">${esc(r.cf)}</td><td>${r.per==='T'?'Trimestrale':'Mensile'}</td><td>${r.updated?new Date(r.updated).toLocaleString('it-IT',{dateStyle:'short',timeStyle:'short'}):''}</td>
+   <td style="white-space:nowrap"><button type="button" class="btn sm" data-o="${i}">Apri</button> <button type="button" class="btn sm danger" data-d="${i}">Elimina</button></td></tr>`).join('')}</tbody></table></div>`
+  :`<div class="empty">${ARCH_STATE==='errore'?'Archivio condiviso non raggiungibile. ':''}Nessuna comunicazione in archivio: premi “Salva in archivio” per conservare quella aperta.</div>`}`;
+  m.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>openRec(ARCH[+b.dataset.o]));
+  m.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>confirmIn(b,'Eliminare dall’archivio?',async()=>{ const r=ARCH[+b.dataset.d];
+    if(r.src==='db'&&DB){ try{ await DB.collection('dichiarazioni').doc(r.id).delete(); }catch(e){ toast('Eliminazione non riuscita.'); } }
+    else { try{ const loc=JSON.parse(localStorage.getItem('lipe26-arch')||'{}'); delete loc[r.id]; localStorage.setItem('lipe26-arch',JSON.stringify(loc)); }catch(e){} }
+    loadArchive(); }));
+  $('#bExp').onclick=()=>saveFile('LIPE_'+ANNO+'_'+(String(S.anag.cf||'nuova').toUpperCase())+'.json',new Blob([JSON.stringify(S,null,1)],{type:'application/json'}));
+}
+
+/* riepilogo laterale */
+function renderSum(){
+  const s=$('#sum'), t=todayIso();
+  const next=[1,2,3,4].find(q=>INVIO[q]>=t&&!(S.inv[q]||{}).inviata)||4;
+  const k=/^[mt]\d/.test(VIEW)?VIEW:null, c=k?C[k]:null;
+  s.innerHTML=`<div><h3>Contribuente</h3><div style="font-weight:600">${esc(den())}</div><div class="muted" style="font-family:var(--f-val);font-size:12.5px">${esc(String(S.anag.cf||'').toUpperCase()||'codice fiscale mancante')}${S.anag.piva&&S.anag.piva!==S.anag.cf?' · P.IVA '+esc(S.anag.piva):''}</div>
+     <div class="muted" style="font-size:12.5px;margin-top:3px">Liquidazioni ${S.per==='M'?'mensili':'trimestrali'+(S.trim==='opz'?' per opzione':' speciali')}</div></div>
+   ${c?`<div><h3>${esc(nomeP(k))}</h3><div class="big">${c.noVp14?'—':fmt(c.vp14d>0?c.vp14d:c.vp14c)}</div><div class="muted" style="font-size:12.5px">${c.noVp14?'Saldo nella dichiarazione annuale':(c.vp14d>0?'IVA da versare':(c.vp14c>0?'IVA a credito':'Saldo zero'))}${c.pay>0?' · F24 '+c.cod+' entro il '+itDate(c.scad):''}</div></div>`:''}
+   <div><h3>Comunicazioni ${ANNO}</h3><div class="kv">${[1,2,3,4].map(q=>{ const r=moduliTrim(q).length, inv=S.inv[q]||{};
+      return `<span>${ROM[q]} trim. · ${itDate(INVIO[q])}</span><span>${inv.inviata?'<span class="pill ok">inviata</span>':(r?(daysTo(INVIO[q])<0?'<span class="pill err">scaduta</span>':'<span class="pill warn">da inviare</span>'):'<span class="pill mut">—</span>')}</span>`; }).join('')}</div>
+     <p class="muted" style="font-size:12px;margin:8px 0 0">Prossima scadenza: ${ROM[next]} trimestre entro il ${itDate(INVIO[next])}${daysTo(INVIO[next])>=0?' (tra '+daysTo(INVIO[next])+' giorni)':''}.</p></div>
+   <div><h3>Totali dell’anno</h3><div class="kv">
+     <span>IVA esigibile</span><span class="v">${fmt(keys().reduce((s,k)=>s+C[k].vp4,0))}</span>
+     <span>IVA detratta</span><span class="v">${fmt(keys().reduce((s,k)=>s+C[k].vp5,0))}</span>
+     <span>Versamenti periodici</span><span class="v">${fmt(keys().reduce((s,k)=>s+C[k].pay,0))}</span>
+     <span>Acconto</span><span class="v">${fmt((acconto()||{}).imp||0)}</span>
+     ${S.cred25!=null?`<span>Credito 2025 residuo</span><span class="v">${fmt(r2(S.cred25-keys().reduce((s,k)=>s+C[k].vp9,0)))}</span>`:''}</div></div>
+   <p class="muted" style="font-size:11.5px;margin:0">Omessa, incompleta o infedele comunicazione: sanzione da 500 a 2.000 euro, ridotta alla metà se l’invio corretto avviene entro 15 giorni dalla scadenza.</p>`;
+}
+
+/* ---------- stampa PDF del modello ---------- */
+async function stampa(q){
+  if(!window.PDFLib){ toast('Libreria PDF non disponibile: verifica la connessione.'); return; }
+  q=q||TRIM||1; const r=controlli(q); if(!r.mods.length){ toast('Nessun modulo per il '+ROM[q]+' trimestre.'); return; }
+  const {PDFDocument,StandardFonts,rgb}=PDFLib; const pdf=await PDFDocument.create();
+  const F=await pdf.embedFont(StandardFonts.Helvetica), FB=await pdf.embedFont(StandardFonts.HelveticaBold), FM=await pdf.embedFont(StandardFonts.CourierBold);
+  const ink=rgb(.08,.13,.16), acc=rgb(.06,.37,.43), mut=rgb(.35,.42,.45), line=rgb(.75,.8,.82), soft=rgb(.87,.93,.94), yel=rgb(1,.95,.76);
+  const safe=s=>String(s??'').replace(/[’‘]/g,"'").replace(/[“”]/g,'"').replace(/–|—/g,'-').replace(/[^\x20-\x7E -ÿ€]/g,'');
+  const W=595.28,H=841.89, mx=40;
+  const txt=(p,s,x,y,o={})=>p.drawText(safe(s),{x,y,size:o.size||9,font:o.font||F,color:o.color||ink});
+  const rtxt=(p,s,x,y,o={})=>{ const f=o.font||FM, sz=o.size||10; s=safe(s); p.drawText(s,{x:x-f.widthOfTextAtSize(s,sz),y,size:sz,font:f,color:o.color||ink}); };
+  const box=(p,x,y,w,h,fill)=>p.drawRectangle({x,y,width:w,height:h,borderColor:line,borderWidth:.7,color:fill});
+  const head=(p,sub)=>{ p.drawRectangle({x:0,y:H-62,width:W,height:62,color:acc});
+    txt(p,'COMUNICAZIONE LIQUIDAZIONI PERIODICHE IVA',mx,H-32,{font:FB,size:14,color:rgb(1,1,1)});
+    txt(p,'Periodo d’imposta '+ANNO+' · '+sub,mx,H-49,{size:9.5,color:rgb(.9,.97,.98)});
+    { const t=safe('Codice fiscale '+String(S.anag.cf||'').toUpperCase()); p.drawText(t,{x:W-mx-FB.widthOfTextAtSize(t,9.5),y:H-49,size:9.5,font:FB,color:rgb(1,1,1)}); } };
+  const field=(p,lab,val,x,y,w)=>{ txt(p,lab,x,y+19,{size:7.2,color:mut}); box(p,x,y,w,16); txt(p,val,x+4,y+4.5,{font:FM,size:9.5}); };
+  /* frontespizio */
+  let p=pdf.addPage([W,H]); head(p,'Frontespizio · '+ROM[q]+' trimestre'); let y=H-110;
+  txt(p,'CONTRIBUENTE',mx,y,{font:FB,size:10,color:acc}); y-=34;
+  field(p,'Codice fiscale',String(S.anag.cf||'').toUpperCase(),mx,y,160); field(p,'Anno d’imposta',ANNO,mx+175,y,70); field(p,'Partita IVA',S.anag.piva,mx+260,y,110); field(p,'P. IVA controllante',S.anag.pivaContr,mx+385,y,130); y-=38;
+  field(p,'Denominazione o cognome e nome',S.anag.den,mx,y,370); field(p,'Ultimo mese',(S.inv[q]||{}).um||'',mx+385,y,55); field(p,'Liq. di gruppo',S.anag.gruppo?'X':'',mx+455,y,60); y-=46;
+  txt(p,'DICHIARANTE',mx,y,{font:FB,size:10,color:acc}); y-=34;
+  field(p,'Codice fiscale del dichiarante',String(S.dich.cf||'').toUpperCase(),mx,y,170); field(p,'Codice carica',S.dich.carica,mx+185,y,70); field(p,'Codice fiscale società',S.dich.cfSoc,mx+270,y,130); field(p,'Firma',S.firma?'FIRMATA':'',mx+415,y,100); y-=46;
+  txt(p,'IMPEGNO ALLA PRESENTAZIONE TELEMATICA',mx,y,{font:FB,size:10,color:acc}); y-=34;
+  field(p,'Codice fiscale dell’intermediario',String(S.int.cf||'').toUpperCase(),mx,y,170); field(p,'Impegno',S.int.cf?S.int.imp:'',mx+185,y,60); field(p,'Data dell’impegno',S.int.cf?itDate(S.int.data):'',mx+260,y,100); field(p,'Firma intermediario',S.int.cf&&S.int.firma?'FIRMATA':'',mx+375,y,140); y-=50;
+  txt(p,'Moduli compilati: '+r.mods.length+' ('+r.mods.map(nomeP).join(', ')+')',mx,y,{size:9}); y-=14;
+  txt(p,'Termine di presentazione: '+itDate(INVIO[q])+(S.inv[q]&&S.inv[q].inviata?' · inviata il '+itDate(S.inv[q].inviata)+(S.inv[q].prot?' · protocollo '+S.inv[q].prot:''):''),mx,y,{size:9});
+  if(r.E.length){ y-=22; txt(p,'Attenzione: la comunicazione presenta '+r.E.length+' errori bloccanti (vedi l’app).',mx,y,{font:FB,size:9,color:rgb(.7,.15,.12)}); }
+  txt(p,'Documento di lavoro predisposto con LIPE '+ANNO+' – non sostituisce il file telematico.',mx,30,{size:7.5,color:mut});
+  /* moduli */
+  r.mods.forEach((k,ix)=>{ const c=C[k],o=S.P[k]||{}; p=pdf.addPage([W,H]); head(p,'Quadro VP · Modulo n. '+(ix+1)); let y=H-100;
+    const tc=isM(k)?'':String(num(k)===4?(S.trim==='opz'?5:4):num(k));
+    box(p,mx,y-30,W-2*mx,30,soft); txt(p,'VP1',mx+6,y-19,{font:FB,size:10,color:acc});
+    txt(p,'Mese  '+(isM(k)?num(k):'')+'      Trimestre  '+tc+'      Subfornitori  '+(o.sub?'X':'-')+'      Eventi eccezionali  '+(o.ev||'-')+'      Operazioni straordinarie  '+(o.ops?'X':'-'),mx+42,y-19,{size:9.5});
+    y-=48; const colD=W-mx-120, colC=W-mx;
+    txt(p,'DEBITI',colD-40,y,{font:FB,size:8,color:mut}); txt(p,'CREDITI',colC-44,y,{font:FB,size:8,color:mut}); y-=8;
+    const ROWS=[['VP2','Totale operazioni attive (al netto dell’IVA)','d',c.vp2],['VP3','Totale operazioni passive (al netto dell’IVA)','c',c.vp3],['VP4','IVA esigibile','d',c.vp4],['VP5','IVA detratta','c',c.vp5],
+      ['VP6','IVA dovuta (col. 1) o a credito (col. 2)','b',[c.vp6d,c.vp6c]],['VP7','Debito periodo precedente non superiore a 100 euro','d',c.vp7],['VP8','Credito periodo precedente','c',c.vp8],['VP9','Credito anno precedente','c',c.vp9],
+      ['VP10','Versamenti auto UE','c',c.vp10],['VP11','Crediti d’imposta','c',c.vp11],['VP12','Interessi dovuti per liquidazioni trimestrali','d',c.vp12],['VP13','Acconto dovuto'+(c.vp13?' (metodo '+(c.met||'-')+')':''),'c',c.vp13],
+      ['VP14','IVA da versare (col. 1) o a credito (col. 2)','b',c.noVp14?[0,0]:[c.vp14d,c.vp14c]]];
+    ROWS.forEach(([cd,ds,t,v])=>{ const tot=cd==='VP6'||cd==='VP14'; y-=26; box(p,mx,y,W-2*mx,26,tot?soft:undefined);
+      txt(p,cd,mx+6,y+9,{font:FB,size:10,color:acc}); txt(p,ds,mx+42,y+9,{size:9});
+      const put=(val,x)=>{ box(p,x-112,y+4,112,18,tot?yel:rgb(1,1,1)); if(val) rtxt(p,fmt(val),x-4,y+9); };
+      if(t==='d'||t==='b') put(t==='b'?v[0]:v,colD); if(t==='c'||t==='b') put(t==='b'?v[1]:v,colC); });
+    y-=30; if(c.nota) txt(p,c.nota,mx,y,{size:8.5,color:mut});
+    txt(p,nomeP(k)+' · '+(c.pay>0?'versamento '+fmt(c.pay)+' euro, codice '+c.cod+', entro il '+itDate(c.scad):'nessun versamento per il periodo'),mx,y-16,{size:9});
+    txt(p,'Documento di lavoro predisposto con LIPE '+ANNO+' – non sostituisce il file telematico.',mx,30,{size:7.5,color:mut}); });
+  const bytes=await pdf.save(); saveFile('LIPE_'+ANNO+'_T'+q+'_'+String(S.anag.cf||'').toUpperCase()+'.pdf',new Blob([bytes],{type:'application/pdf'}));
+}
+
+/* ---------- file ---------- */
+function saveFile(name,blob){
+  if(DL&&!window.SUITE_PARENT){ DL.save({filename:name,data:blob}).then(()=>toast('File pronto: '+name)).catch(e=>{ if(!e||e.code!=='declined') toast('Salvataggio non riuscito.'); }); return; }
+  const u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); toast('File scaricato: '+name);
+}
+
+/* ---------- eventi ---------- */
+document.addEventListener('click',e=>{ const s=e.target.closest&&e.target.closest('[data-lipe-sel]'); if(s) window.__lipeSel=s.dataset.lipeSel; },true);
+document.addEventListener('click',e=>{
+  const v=e.target.closest('#nav [data-v]'); if(v){ go(v.dataset.v); return; }
+  const g=e.target.closest('[data-go]'); if(g){ e.preventDefault(); go(g.dataset.go); return; }
+  const t=e.target.closest('[data-tri]'); if(t){ TRIM=+t.dataset.tri; VIEW='INV'; renderMain(); renderNavDots(); return; }
+  const pr=e.target.closest('[data-per]'); if(pr){ const np=pr.dataset.per; if(np===S.per) return;
+    const has=Object.keys(S.P).some(k=>compiled(S.P[k]));
+    const sw=()=>{ S.per=np; S.P={}; changed(); C=calc(); renderNav(); recalc(); renderMain(); toast('Periodicità '+(np==='M'?'mensile':'trimestrale')+'.'); };
+    if(has) confirmIn(pr,'Cambiando periodicità i dati dei periodi vengono cancellati. Procedere?',sw); else sw(); return; }
+  const rs=e.target.closest('[data-rst]'); if(rs){ const [k,f]=rs.dataset.rst.split(':'); const o=P(k); if(o.ovr) delete o.ovr[f]; changed(); recalc(); renderMain(); return; }
+});
+document.addEventListener('input',e=>{ const el=e.target;
+  if(el.dataset.p&&el.dataset.k){ const v=parseAmt(el.value,!!el.dataset.neg); el.classList.toggle('bad',v!==null&&isNaN(v)); if(isNaN(v)) return; P(el.dataset.k)[el.dataset.p]=v; changed(); recalc(); refreshCalc(el.dataset.k); return; }
+  if(el.dataset.o&&el.dataset.k){ const v=parseAmt(el.value); el.classList.toggle('bad',v!==null&&isNaN(v)); if(isNaN(v)) return; const o=P(el.dataset.k); o.ovr=o.ovr||{}; if(v===null) delete o.ovr[el.dataset.o]; else o.ovr[el.dataset.o]=v; el.classList.add('ovr'); el.classList.remove('auto'); changed(); recalc(); refreshCalc(el.dataset.k); return; }
+});
+document.addEventListener('change',e=>{ const el=e.target;
+  if(el.dataset.p&&el.dataset.k){ const v=parseAmt(el.value,!!el.dataset.neg); if(!isNaN(v)) el.value=fmt(v); renderNavDots(); return; }
+  if(el.dataset.o&&el.dataset.k){ recalc(); renderMain(); return; }
+  if(el.dataset.b&&el.dataset.k){ P(el.dataset.k)[el.dataset.b]=el.checked; changed(); recalc(); renderMain(); return; }
+  if(el.dataset.s&&el.dataset.k){ P(el.dataset.k)[el.dataset.s]=el.value; changed(); recalc(); renderMain(); return; }
+  if(el.dataset.vers){ const k=el.dataset.vers; if(k==='acc') S.accVers=el.checked; else P(k).versato=el.checked; changed(); renderMain(); return; }
+  if(el.dataset.inv){ const q=TRIM, inv=S.inv[q]||(S.inv[q]={}); inv[el.dataset.inv]=el.type==='checkbox'?el.checked:el.value; changed(); recalc(); renderMain(); return; }
+  if(el.dataset.f){ const f=el.dataset.f; let v=el.type==='checkbox'?el.checked:el.value;
+    if(el.dataset.amt){ v=parseAmt(v); if(isNaN(v)){ el.classList.add('bad'); return; } }
+    else if(typeof v==='string'&&/cf|piva|Contr|cfSoc/.test(f)) v=v.toUpperCase().replace(/\s/g,'');
+    setPath(f,v); if(f==='anag.cf'&&/^\d{11}$/.test(v)&&!S.anag.piva) S.anag.piva=v; if(f==='anag.den') S.anag.den=String(v).toUpperCase();
+    changed(); recalc(); if(VIEW==='FR') renderFront($('#main')); return; }
+});
+$('#bNew').onclick=e=>confirmIn(e.currentTarget,'Nuova comunicazione? I dati non salvati in archivio andranno persi.',()=>{ S=blank(); C=calc(); draft(); renderNav(); recalc(); go('FR'); });
+$('#bSave').onclick=salva;
+$('#bArch').onclick=()=>{ go('ARC'); loadArchive(); };
+$('#bLoad').onclick=()=>$('#fileJson').click();
+$('#bImp').onclick=()=>$('#fileXml').click();
+$('#bPdf').onclick=()=>stampa(TRIM||[1,2,3,4].find(q=>moduliTrim(q).length)||1);
+$('#bTel').onclick=()=>go('INV');
+$('#fileJson').onchange=e=>{ const f=e.target.files[0]; if(!f) return; const fr=new FileReader(); fr.onload=()=>{ try{ const d=JSON.parse(fr.result); if(!d||!d.P) throw 0; S=fix(d); C=calc(); draft(); renderNav(); recalc(); go('FR'); toast('Comunicazione caricata da file.'); }catch(err){ toast('File JSON non riconosciuto.'); } }; fr.readAsText(f); e.target.value=''; };
+$('#fileXml').onchange=e=>{ const f=e.target.files[0]; if(!f) return; const fr=new FileReader(); fr.onload=()=>{ try{ const r=importXml(fr.result); renderNav(); recalc(); TRIM=r.q; go('INV'); toast('Importati '+r.n+' moduli del '+ROM[r.q]+' trimestre.'); }catch(err){ toast('Importazione non riuscita: '+(err.message||err)); } }; fr.readAsText(f); e.target.value=''; };
+
+/* ---------- avvio ---------- */
+renderNav(); recalc(); go('FR');
+const cl=window.claude;
+if(cl&&cl.use){ cl.use('downloads').then(x=>{DL=x;}).catch(()=>{}); cl.use('db').then(x=>{DB=x; loadArchive();}).catch(()=>{ARCH_STATE='errore';loadArchive();}); } else loadArchive();
+
+/* ---------- suite: dati per il Modello F24 ---------- */
+window.LIPE={S:()=>S,C:()=>C,buildXml,controlli,importXml,calc:()=>{C=calc();return C}};
+window.suiteF24Payload=function(){
+  C=calc(); const cf=String(S.anag.cf||'').toUpperCase(); let sel=window.__lipeSel; window.__lipeSel=null;
+  if(!sel&&/^[mt]\d/.test(VIEW)) sel=VIEW;
+  if(!sel){ const t=todayIso(); sel=keys().find(k=>C[k].pay>0&&C[k].scad>=t)||keys().slice().reverse().find(k=>C[k].pay>0)||(acconto()?'acc':null); }
+  const base={app:'lipe',modello:'LIPE '+ANNO,anno:String(ANNO),contrib:{cf,cognome:S.anag.den||'',nome:''},noMagg:true,noAcc2:true,crediti:[],avvisi:[]};
+  if(sel==='acc'){ const a=acconto(); if(!a) return Object.assign(base,{righe:[],scadenze:{saldo:SCAD_ACC,acc2:SCAD_ACC},avvisi:['Nessun acconto IVA indicato nel rigo VP13.']});
+    return Object.assign(base,{etichetta:'Acconto IVA '+ANNO,scadenze:{saldo:a.scad,acc2:a.scad},scadNota:'Acconto IVA '+ANNO+' entro il '+itDate(a.scad)+' (27 dicembre, domenica).',
+      righe:[{sez:'erario',cod:a.cod,desc:'Acconto IVA '+ANNO+(S.per==='M'?' – mensili':' – trimestrali'),imp:a.imp,anno:String(ANNO),rat:'',scad:'saldo'}]}); }
+  const c=sel&&C[sel];
+  if(!c||!(c.pay>0)) return Object.assign(base,{righe:[],scadenze:{saldo:c?c.scad:SCAD_M[1],acc2:SCAD_ACC},avvisi:[c?(nomeP(sel)+': '+(c.nota||'nessun importo da versare.')):'Nessun periodo con IVA da versare.']});
+  const lab=isM(sel)?'IVA '+MESI[num(sel)-1]+' '+ANNO:'IVA '+ROM[num(sel)]+' trimestre '+ANNO;
+  return Object.assign(base,{etichetta:Cap(lab),scadenze:{saldo:c.scad,acc2:SCAD_ACC},
+    scadNota:Cap(lab)+': versamento entro il '+itDate(c.scad)+(S.per==='T'&&S.trim==='opz'?' (interessi dell’1% compresi nell’importo).':'.'),
+    righe:[{sez:'erario',cod:c.cod,desc:Cap(lab)+(c.vp12?' (compresi interessi '+fmt(c.vp12)+')':''),imp:c.pay,anno:String(ANNO),rat:'',scad:'saldo'}]});
+};
+})();
+</script>
+<script>/* Frecce di scorrimento (inizio, pagina su, pagina giù, fine) – come nell'app IRAP 2026 */
+(function(){
+  if(document.getElementById('scrollNav')) return;
+  const C={panel:'var(--panel,#f8fafa)',line:'var(--line,#ccd6d9)',acc:'var(--acc,#0f5e6e)'};
+  const css=document.createElement('style');
+  css.textContent=`.sn-box{position:fixed;right:max(14px,env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;flex-direction:column;gap:6px}
+.sn-box[hidden]{display:none!important}
+.sn-box button{width:42px;height:42px;border-radius:50%;border:1px solid ${C.line};background:${C.panel};color:${C.acc};font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;padding:0;font-family:system-ui,sans-serif}
+.sn-box button.sm{width:34px;height:34px;font-size:14px;align-self:center}
+.sn-box button:hover{border-color:${C.acc}}
+.sn-box button:focus-visible{outline:2px solid ${C.acc};outline-offset:2px}
+.sn-box button[disabled]{opacity:.35;cursor:default;box-shadow:none}
+@media print{.sn-box{display:none!important}}`;
+  document.head.appendChild(css);
+  const box=document.createElement('div'); box.className='sn-box no-print'; box.id='scrollNav'; box.hidden=true;
+  box.innerHTML='<button type="button" class="sm" data-sn="top" title="Inizio della pagina" aria-label="Inizio della pagina">⤒</button>'+
+    '<button type="button" data-sn="up" title="Pagina su" aria-label="Pagina su">▲</button>'+
+    '<button type="button" data-sn="down" title="Pagina giù" aria-label="Pagina giù">▼</button>'+
+    '<button type="button" class="sm" data-sn="end" title="Fine della pagina" aria-label="Fine della pagina">⤓</button>';
+  document.body.appendChild(box);
+  const b=k=>box.querySelector('[data-sn="'+k+'"]');
+  const smooth=()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
+  const maxY=()=>Math.max(0,document.documentElement.scrollHeight-window.innerHeight);
+  const step=()=>Math.round(window.innerHeight*0.85);
+  const to=y=>window.scrollTo({top:Math.max(0,Math.min(maxY(),y)),behavior:smooth()});
+  box.addEventListener('click',e=>{const t=e.target.closest('[data-sn]');if(!t)return;e.stopPropagation();
+    const k=t.dataset.sn; if(k==='up')to(window.scrollY-step()); else if(k==='down')to(window.scrollY+step()); else if(k==='top')to(0); else to(maxY());});
+  const upd=()=>{const m=maxY();box.hidden=m<40;const y=window.scrollY;
+    b('up').disabled=b('top').disabled=y<=2; b('down').disabled=b('end').disabled=y>=m-2;};
+  let raf=0; const sch=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;upd();});};
+  window.addEventListener('scroll',sch,{passive:true}); window.addEventListener('resize',sch);
+  if(window.ResizeObserver) new ResizeObserver(sch).observe(document.body);
+  new MutationObserver(sch).observe(document.body,{childList:true,subtree:true});
+  upd();
+})();
+</script>
+<script>/* ================= DIRITTO ANNUALE CAMERA DI COMMERCIO 2026 =================
+   Art. 18 L. 580/1993 · D.M. 21/04/2011 (misure e scaglioni) · art. 28 D.L. 90/2014 (riduzione 50%)
+   Nota MIMIT 16/01/2026 (misure 2026 invariate, arrotondamenti) · D.M. MIMIT 17/03/2026 (incremento 20% 2026-2028)
+   Versamento con F24, codice tributo 3850, sezione IMU e altri tributi locali, codice ente = sigla della provincia */
+(function(){
+  const APP='lipe';
+  if(window.__dcLoaded) return; window.__dcLoaded=true;
+  const ANNO='2026';
+  const TIPI={
+    ind_spec:{n:'Impresa individuale – sezione speciale (piccoli imprenditori, artigiani, coltivatori diretti)',sede:44,ul:8.8},
+    ind_ord:{n:'Impresa individuale – sezione ordinaria',sede:100,ul:20},
+    soc:{n:'Società ed enti iscritti nella sezione ordinaria (calcolo sul fatturato)',fatt:true},
+    ss_agr:{n:'Società semplice agricola',sede:50,ul:10},
+    ss_nagr:{n:'Società semplice non agricola',sede:100,ul:20},
+    avv:{n:'Società tra avvocati (D.Lgs. 96/2001)',sede:100,ul:20},
+    rea:{n:'Soggetto iscritto solo al REA',sede:15,ul:0},
+    estero:{n:'Impresa con sede principale all’estero (per ogni unità locale o sede secondaria)',sede:0,ul:55}
+  };
+  const SCAGLIONI=[[0,100000,null],[100000,250000,.00015],[250000,500000,.00013],[500000,1000000,.0001],[1000000,10000000,.00009],[10000000,35000000,.00005],[35000000,50000000,.00003],[50000000,Infinity,.00001]];
+  const PROV='AG AL AN AO AP AQ AR AT AV BA BG BI BL BN BO BR BS BT BZ CA CB CE CH CI CL CN CO CR CS CT CZ EN FC FE FG FI FM FR GE GO GR IM IS KR LC LE LI LO LT LU MB MC ME MI MN MO MS MT NA NO NU OG OR OT PA PC PD PE PG PI PN PO PR PT PU PV PZ RA RC RE RG RI RM RN RO SA SI SO SP SR SS SU SV TA TE TN TO TP TR TS TV UD VA VB VC VE VI VR VS VT VV'.split(' ');
+  const SENZA_MAGG=new Set(['NA']); // camere non comprese nell'allegato A del D.M. 17/03/2026 (verificare sul sito della CCIAA)
+  const r2=x=>Math.round((x+1e-9)*100)/100, r5=x=>Math.round((x+1e-12)*1e5)/1e5;
+  const eu=n=>{n=Number(n)||0;const neg=n<0,c=Math.round(Math.abs(n)*100);return (neg&&c?'-':'')+String(Math.floor(c/100)).replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+String(c%100).padStart(2,'0')};
+  const pa=v=>{let s=String(v??'').trim().replace(/[\s€]/g,'');if(!s)return 0;if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');else if(/^-?\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,'');const n=parseFloat(s);return isFinite(n)?n:0};
+  const h=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const LS={get(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+
+  /* ---------- calcolo ---------- */
+  function calcola(c){
+    const t=TIPI[c.tipo]||TIPI.soc, m=c.magg?1.2:1, nul=Math.max(0,parseInt(c.ul,10)||0);
+    const out={righe:[],note:[],tipo:t};
+    if(t.fatt){
+      const f=Math.max(0,pa(c.fatt)); let base=0;
+      if(c.nuova){ out.righe.push(['Misura fissa per le imprese iscritte nel '+ANNO,200]); base=200; out.note.push('Impresa iscritta nel corso del '+ANNO+': si versa la misura fissa entro 30 giorni dall’iscrizione.'); }
+      else SCAGLIONI.forEach(([da,a,al])=>{ if(al===null){ out.righe.push(['Fino a 100.000 € – misura fissa',200]); base+=200; return; }
+        if(f>da){ const q=Math.min(f,a)-da; const v=r5(q*al); out.righe.push([`Da ${eu(da).replace(',00','')} a ${a===Infinity?'oltre':eu(a).replace(',00','')} € – ${(al*100).toFixed(3).replace(/0+$/,'').replace('.',',')}% su ${eu(q)}`,v]); base+=v; } });
+      base=r5(base); if(base>40000){ out.note.push('Importo massimo di 40.000 € (prima della riduzione).'); base=40000; }
+      out.base=base; out.rid=r5(base*0.5); out.sede=r5(out.rid*m);
+      out.ulUno=nul?Math.min(r5(out.sede*0.2),100*m):0;
+      if(nul&&out.sede*0.2>100*m) out.note.push('Unità locali: 20% dell’importo della sede, con il massimo di '+eu(100*m)+' € per unità.');
+    } else {
+      out.base=t.sede; out.rid=t.sede; out.sede=r5(t.sede*m); out.ulUno=r5(t.ul*m);
+      if(c.tipo==='estero'){ out.sede=0; out.note.push('Si versa 55 € (maggiorati se previsto) per ogni unità locale o sede secondaria in Italia: indicare il numero nel campo unità locali.'); }
+    }
+    out.ul=r5(out.ulUno*nul);
+    out.totDec=r2(out.sede+out.ul); out.tot=Math.round(out.totDec);
+    out.versato=Math.max(0,pa(c.versato)); out.daVersare=Math.max(0,out.tot-Math.round(out.versato));
+    out.cong=out.versato>0;
+    return out;
+  }
+
+  /* ---------- dati del contribuente e fatturato IRAP ---------- */
+  function payload(){ try{ return window.suiteF24Payload?window.suiteF24Payload():null }catch(e){ return null } }
+  function cfCorrente(){
+    if(APP==='f24'){ try{ return String(state.contrib.cf||'').toUpperCase() }catch(e){ return '' } }
+    const p=payload(); if(p&&p.contrib&&p.contrib.cf) return String(p.contrib.cf).toUpperCase();
+    try{ if(typeof S!=='undefined'&&S&&S.B){ const v=S.B.B2||S.B.B002||''; if(v) return String(v).toUpperCase(); } }catch(e){}
+    if(APP==='pf'){ const id=LS.get('rpf26_last'), a=LS.get('rpf26_archivio')||{}; if(id&&a[id]&&a[id].anag) return String(a[id].anag.cf||'').toUpperCase(); }
+    return ''; }
+  function fattDaQ(Q){ // righi IRAP da considerare come fatturato (circolare MiSE 19230/2009, numerazione modello IRAP 2026)
+    const g=(q,c)=>(Q&&Q[q]||[]).reduce((s,o)=>s+pa(o&&o[c]),0); const parts=[];
+    const add=(lbl,v)=>{ if(v) parts.push([lbl,v]); };
+    add('IC1 + IC5 ricavi e altri ricavi',g('IC','IC001001')+g('IC','IC005001'));
+    const ip2=g('IP','IP013001')+g('IP','IP017001'); if(ip2) add('IP13 + IP17 ricavi e altri ricavi',ip2); else add('IP1 ricavi',g('IP','IP001001'));
+    add('IP52 corrispettivi (attività agricola)',g('IP','IP052001'));
+    add('IE6 + IE10 ricavi dell’attività commerciale',g('IE','IE006001')+g('IE','IE010001'));
+    add('IK6 + IK10 ricavi dell’attività commerciale',g('IK','IK006001')+g('IK','IK010001'));
+    return {tot:parts.reduce((s,x)=>s+x[1],0),parts};
+  }
+  function fattIRAP(cf){
+    if(APP==='irap'){ try{ const r=fattDaQ(S.Q); if(r.tot) return Object.assign(r,{fonte:'dichiarazione IRAP aperta'}); }catch(e){} }
+    const cand=[]; const d=LS.get('irap26-draft'); if(d&&d.B) cand.push(d);
+    const a=LS.get('irap26-arch')||{}; Object.values(a).forEach(r=>{ try{ cand.push(JSON.parse(r.json)) }catch(e){} });
+    for(const s of cand){ const c=String(s.B&&s.B.B002||'').toUpperCase(); if(cf&&c===cf){ const r=fattDaQ(s.Q); if(r.tot) return Object.assign(r,{fonte:'dichiarazione IRAP 2026 in archivio'}); } }
+    return null;
+  }
+  function tipoDefault(cf){
+    if(APP==='pf') return 'ind_spec';
+    if(APP==='enc') return 'rea';
+    if(APP==='irap'){ try{ if((S.Q.IE||[]).some(o=>Object.keys(o).length)) return 'rea'; }catch(e){} }
+    return cf&&cf.length===16?'ind_spec':'soc';
+  }
+  function provDefault(){
+    try{ if(APP==='f24'&&state.contrib.prov) return String(state.contrib.prov).toUpperCase(); }catch(e){}
+    const p=payload(); if(p&&p.contrib&&p.contrib.prov) return String(p.contrib.prov).toUpperCase();
+    if(APP==='pf'){ const id=LS.get('rpf26_last'), a=LS.get('rpf26_archivio')||{}; const an=id&&a[id]&&a[id].anag; if(an&&(an.dom26Prov||an.dom25Prov)) return String(an.dom26Prov||an.dom25Prov).toUpperCase(); }
+    return 'SS';
+  }
+  function cfgFor(cf){
+    const k='dc26:'+(cf||'_'); const c=LS.get(k)||{};
+    const prov=c.prov||provDefault();
+    return Object.assign({tipo:tipoDefault(cf),fatt:'',ul:'0',prov,magg:!SENZA_MAGG.has(prov),versato:'',nuova:false,incl:true},c);
+  }
+  function saveCfg(cf,c){ LS.set('dc26:'+(cf||'_'),c); }
+
+  /* ---------- F24 delle dichiarazioni: riga 3850 ---------- */
+  function riga(cf){
+    const c=cfgFor(cf); if(!LS.get('dc26:'+(cf||'_'))) return null; const r=calcola(c); const imp=r.cong?r.daVersare:r.tot;
+    if(!c.incl||!imp) return null;
+    return {sez:'imu',cod:'3850',ente:c.prov,anno:ANNO,imp,rat:'',scad:r.cong?'acc2':'saldo',
+      desc:'Diritto annuale CCIAA '+ANNO+(r.cong?' – differenza (incremento 20%) entro il 30/11/'+ANNO:'')};
+  }
+  if(APP!=='f24'&&typeof window.suiteF24Payload==='function'){
+    const orig=window.suiteF24Payload;
+    window.suiteF24Payload=function(){ const p=orig.apply(this,arguments); if(!p) return p;
+      try{ const rg=riga(String(p.contrib&&p.contrib.cf||'').toUpperCase());
+        if(window.__dcSolo){ window.__dcSolo=false; p.righe=rg?[rg]:[]; p.crediti=[]; p.avvisi=[]; p.anno=ANNO; p.modello=(p.modello||'')+' – diritto annuale CCIAA'; delete p.etichetta; delete p.noMagg; delete p.noAcc2;
+          if(APP==='iva'||APP==='lipe'||!p.scadenze||!p.scadenze.saldo) p.scadenze={saldo:ANNO+'-06-30',acc2:ANNO+'-11-30'}; else if(!p.scadenze.acc2) p.scadenze.acc2=ANNO+'-11-30'; p.scadNota='Diritto annuale '+ANNO+': termine del primo acconto delle imposte sui redditi; la differenza dovuta all’incremento del 20% si versa entro il 30/11/'+ANNO+'.'; return p; }
+        if(rg&&APP!=='iva'&&APP!=='lipe'&&!(p.righe||[]).some(x=>x.cod==='3850')) (p.righe=p.righe||[]).push(rg);
+      }catch(e){ console.error(e); }
+      return p; };
+  }
+
+  /* ---------- interfaccia ---------- */
+  const css=document.createElement('style');
+  css.textContent=`.dc-ov{position:fixed;inset:0;z-index:70;background:rgba(10,20,28,.5);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow-y:auto}
+.dc-box{background:var(--panel,var(--cream,#fff));color:var(--ink,#16232b);border:1px solid var(--line,var(--rule,#d5dee5));border-radius:12px;width:100%;max-width:860px;box-shadow:0 14px 40px rgba(0,0,0,.3);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.dc-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line,var(--rule,#d5dee5))}
+.dc-hd b{font-size:18px}.dc-hd small{display:block;color:var(--muted,#5b6b78);font-size:12px;font-weight:400}
+.dc-bd{padding:14px 18px 18px;display:flex;flex-direction:column;gap:14px}
+.dc-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 14px}
+.dc-g label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted,#5b6b78)}
+.dc-g label.w{grid-column:1/-1}
+.dc-g label.ck{flex-direction:row;align-items:center;gap:7px;color:var(--ink,#16232b);font-size:13px}
+.dc-g input:not([type=checkbox]),.dc-g select{font:inherit;font-size:14px;color:inherit;background:var(--bg,#fff);border:1px solid var(--line,var(--rule,#cfd8de));border-radius:6px;padding:6px 8px;width:100%;min-width:0}
+.dc-g input.n{text-align:right;font-family:ui-monospace,Consolas,monospace}
+.dc-sug{font-size:12px;color:var(--muted,#5b6b78)}.dc-sug button{margin-left:6px}
+.dc-t{width:100%;border-collapse:collapse;font-size:13px}.dc-t td{padding:5px 8px;border-bottom:1px solid var(--line,var(--rule,#e2e8ec))}
+.dc-t td.n{text-align:right;font-family:ui-monospace,Consolas,monospace;white-space:nowrap}.dc-t tr.s td{font-weight:700}.dc-t tr.tot td{font-weight:700;font-size:15px;border-top:2px solid currentColor}
+.dc-res{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.dc-res div{border:1px solid var(--line,var(--rule,#d5dee5));border-radius:8px;padding:9px 12px}.dc-res span{display:block;font-size:11.5px;color:var(--muted,#5b6b78)}.dc-res b{font-family:ui-monospace,Consolas,monospace;font-size:19px}
+.dc-note{font-size:12.5px;color:var(--muted,#5b6b78);margin:0;padding-left:18px}.dc-note li{margin:3px 0}
+.dc-act{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.dc-btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line,var(--rule,#cfd8de));background:var(--panel,#fff);color:inherit;border-radius:7px;padding:7px 12px;cursor:pointer}
+.dc-btn.pri{background:var(--acc,var(--accent,var(--plum,var(--ink,#0b5d7a))));border-color:transparent;color:#fff}
+.dc-warn{border-left:3px solid #b07a00;background:rgba(240,180,60,.12);padding:7px 10px;border-radius:4px;font-size:12.5px}
+@media print{.dc-ov{display:none!important}}`;
+  document.head.appendChild(css);
+
+  function render(ov){
+    const cf=cfCorrente(); const c=cfgFor(cf); const r=calcola(c); const fi=TIPI[c.tipo].fatt?fattIRAP(cf):null;
+    const suite=!!(window.SUITE_PARENT); const imp=r.cong?r.daVersare:r.tot;
+    ov.querySelector('.dc-box').innerHTML=`
+    <div class="dc-hd"><div><b>Diritto annuale Camera di commercio ${ANNO}</b><small>${h(cf||'Codice fiscale non indicato')} · art. 18 L. 580/1993 · D.M. 21/04/2011 · D.L. 90/2014 · D.M. 17/03/2026</small></div><button type="button" class="dc-btn" data-dc="close">Chiudi</button></div>
+    <div class="dc-bd">
+      <div class="dc-g">
+        <label class="w">Tipologia del soggetto<select data-k="tipo">${Object.entries(TIPI).map(([k,v])=>`<option value="${k}"${k===c.tipo?' selected':''}>${h(v.n)}</option>`).join('')}</select></label>
+        ${TIPI[c.tipo].fatt?`<label>Fatturato ${ANNO-1} ai fini IRAP (€)<input class="n" data-k="fatt" value="${h(c.fatt)}" placeholder="0,00" inputmode="decimal"></label>
+        <label class="ck"><input type="checkbox" data-k="nuova"${c.nuova?' checked':''}> Iscritta nel registro nel ${ANNO}</label>`:''}
+        <label>Unità locali nella stessa provincia<input class="n" data-k="ul" value="${h(c.ul)}" inputmode="numeric"></label>
+        <label>Camera di commercio (sigla provincia)<select data-k="prov">${PROV.map(p=>`<option${p===c.prov?' selected':''}>${p}</option>`).join('')}</select></label>
+        <label class="ck"><input type="checkbox" data-k="magg"${c.magg?' checked':''}> Incremento 20% (D.M. 17/03/2026, progetti ${ANNO}-2028)</label>
+        <label>Già versato per il ${ANNO} (€)<input class="n" data-k="versato" value="${h(c.versato)}" placeholder="0,00" inputmode="decimal"></label>
+        ${APP!=='f24'&&APP!=='lipe'?`<label class="ck"><input type="checkbox" data-k="incl"${c.incl?' checked':''}> Includi nel Modello F24 della dichiarazione</label>`:''}
+      </div>
+      ${TIPI[c.tipo].fatt?`<div class="dc-sug">${fi?`Fatturato dalla ${h(fi.fonte)}: <b>${eu(fi.tot)} €</b> (${fi.parts.map(p=>h(p[0])+' '+eu(p[1])).join(' + ')})<button type="button" class="dc-btn" data-dc="usaf">Usa questo importo</button>`:'Fatturato = ricavi e altri proventi della dichiarazione IRAP '+ANNO+' (IC1 + IC5 società di capitali; IP13 + IP17 o IP1 società di persone; IP52 attività agricole; IE6 + IE10 enti) – circolare MiSE 19230/2009.'}</div>`:''}
+      <table class="dc-t"><tbody>
+        ${TIPI[c.tipo].fatt?r.righe.map(x=>`<tr><td>${h(x[0])}</td><td class="n">${eu(x[1])}</td></tr>`).join('')+`<tr class="s"><td>Totale per scaglioni</td><td class="n">${eu(r.base)}</td></tr><tr><td>Riduzione del 50% (art. 28 D.L. 90/2014)</td><td class="n">${eu(r.rid)}</td></tr>`
+          :`<tr><td>Misura fissa ${c.tipo==='estero'?'per unità locale':'della sede'} (già ridotta del 50%)</td><td class="n">${eu(c.tipo==='estero'?TIPI.estero.ul:r.rid)}</td></tr>`}
+        ${c.magg?`<tr><td>Incremento del 20% – sede</td><td class="n">${eu(r.sede)}</td></tr>`:''}
+        ${(parseInt(c.ul,10)||0)>0?`<tr><td>Unità locali: ${parseInt(c.ul,10)} × ${eu(r.ulUno)}</td><td class="n">${eu(r.ul)}</td></tr>`:''}
+        <tr><td>Totale (arrotondato al centesimo)</td><td class="n">${eu(r.totDec)}</td></tr>
+        <tr class="tot"><td>Diritto annuale ${ANNO} dovuto (arrotondato all’unità di euro)</td><td class="n">${eu(r.tot)}</td></tr>
+        ${r.cong?`<tr><td>Già versato</td><td class="n">− ${eu(r.versato)}</td></tr><tr class="tot"><td>Differenza da versare</td><td class="n">${eu(r.daVersare)}</td></tr>`:''}
+      </tbody></table>
+      <div class="dc-res"><div><span>Codice tributo</span><b>3850</b></div><div><span>Codice ente</span><b>${h(c.prov)}</b></div><div><span>Anno di riferimento</span><b>${ANNO}</b></div><div><span>Importo a debito</span><b>${eu(imp)}</b></div></div>
+      ${r.note.length?`<div class="dc-warn">${r.note.map(h).join('<br>')}</div>`:''}
+      <ul class="dc-note">
+        <li>Scaglioni con 5 decimali, riduzione del 50%, incremento del 20% dove deliberato, arrotondamento al centesimo e poi all’unità di euro su tutto l’importo (sede e unità locali della stessa provincia) – nota MIMIT 16/01/2026.</li>
+        <li>Termine: quello del primo acconto delle imposte sui redditi (30/06/${ANNO}, oppure entro 30 giorni con la maggiorazione dello 0,40%). Chi ha versato senza l’incremento del 20% versa la differenza entro il 30/11/${ANNO} (art. 17, c. 3, lett. b, DPR 435/2001) senza sanzioni.</li>
+        <li>F24 sezione «IMU e altri tributi locali»: codice ente = sigla della provincia, codice tributo 3850, anno ${ANNO}. Unità locali in altre province: rigo separato con la sigla di quella provincia. Ravvedimento: 3851 interessi, 3852 sanzione (D.M. 54/2005).</li>
+        <li>Incremento del 20% applicato da 61 camere per il triennio ${ANNO}-2028 (tutte le sarde: Sassari, Nuoro, Cagliari-Oristano). Verificare sempre l’importo sul sito della Camera competente o su dirittoannuale.camcom.it.</li>
+      </ul>
+      <div class="dc-act">
+        ${APP==='f24'?`<button type="button" class="dc-btn pri" data-dc="f24add"${imp?'':' disabled'}>Aggiungi al modello F24 (3850 · ${h(c.prov)} · ${eu(imp)} €)</button>`
+          :suite?`<button type="button" class="dc-btn pri" data-dc="f24send"${imp?'':' disabled'}>Compila il Modello F24 con il diritto annuale</button>`:''}
+        <button type="button" class="dc-btn" data-dc="close">Chiudi</button>
+      </div>
+    </div>`;
+  }
+  function open(){
+    let ov=document.getElementById('dcOv'); if(ov) ov.remove();
+    ov=document.createElement('div'); ov.id='dcOv'; ov.className='dc-ov'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-label','Diritto annuale Camera di commercio');
+    ov.innerHTML='<div class="dc-box"></div>'; document.body.appendChild(ov); render(ov);
+    ov.addEventListener('click',e=>{ if(e.target===ov){ ov.remove(); return; }
+      const b=e.target.closest('[data-dc]'); if(!b) return; const a=b.dataset.dc; const cf=cfCorrente(); const c=cfgFor(cf);
+      if(a==='close'){ ov.remove(); return; }
+      if(a==='usaf'){ const fi=fattIRAP(cf); if(fi){ c.fatt=eu(fi.tot); saveCfg(cf,c); render(ov); } return; }
+      if(a==='f24add'){ const r=calcola(c); const imp=r.cong?r.daVersare:r.tot; if(!imp) return;
+        try{ state.imu=state.imu.filter(rowFilled); state.imu.push({...EMPTY.imu(),ente:c.prov,cod:'3850',anno:ANNO,deb:eu(imp)}); renderRows('imu'); dirty=true; recalc(); if(typeof showTab==='function') showTab('form');
+          toast('Diritto annuale inserito: 3850 · '+c.prov+' · € '+eu(imp)); }catch(err){ console.error(err); } ov.remove(); return; }
+      if(a==='f24send'){ saveCfg(cf,c); ov.remove(); window.__dcSolo=true; try{ window.SUITE_PARENT.SUITE.sendF24(APP); }catch(err){ window.__dcSolo=false; } return; }
+    });
+    const upd=e=>{ const t=e.target; const k=t.dataset&&t.dataset.k; if(!k) return; const cf=cfCorrente(); const c=cfgFor(cf);
+      c[k]=t.type==='checkbox'?t.checked:t.value; if(k==='prov') c.magg=!SENZA_MAGG.has(c.prov);
+      saveCfg(cf,c); if(e.type==='change'||t.tagName==='SELECT'||t.type==='checkbox') render(ov); else { const pos=t.selectionStart; render(ov); const n=ov.querySelector(`[data-k="${k}"]`); if(n){ n.focus(); try{ n.setSelectionRange(pos,pos) }catch(_){} } } };
+    ov.addEventListener('change',upd); ov.addEventListener('input',e=>{ if(e.target.tagName==='INPUT'&&e.target.type!=='checkbox') upd(e); });
+    document.addEventListener('keydown',function esc(e){ if(e.key==='Escape'){ const o=document.getElementById('dcOv'); if(o) o.remove(); document.removeEventListener('keydown',esc); } });
+  }
+  window.dcApri=open;
+  function addButton(){
+    const host=document.querySelector('header.top .actions')||document.querySelector('.toolbar-inner');
+    if(!host||host.querySelector('[data-dc-open]')) return;
+    const b=document.createElement('button'); b.type='button'; b.className=APP==='f24'?'btn':'btn'; b.setAttribute('data-dc-open','');
+    b.title='Calcolo del diritto annuale della Camera di commercio '+ANNO; b.textContent=APP==='f24'?'DIRITTO CAMERALE':'Diritto camerale';
+    b.addEventListener('click',open);
+    const ref=host.querySelector('[data-act="themePanel"]'); if(ref) host.insertBefore(b,ref); else host.appendChild(b);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',addButton); else addButton();
+})();
+</script>
+</body></html>
