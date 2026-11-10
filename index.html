@@ -1226,7 +1226,7 @@ async function renderHome() {
   $('#todo').innerHTML = !CLIENTI.length ? `<div class="empty">L’anagrafica è vuota. Apri <b>Clienti</b> per inserire il primo cliente o per raccogliere quelli già presenti nei moduli.</div>`
     : da.length ? `<div class="todo">${da.slice(0, 8).map(([c, m]) => `<button type="button" data-cli="${esc(c.id)}"><span>${esc(nomeCli(c))}<small>Manca: ${esc(m.join(', '))}</small></span><span class="pill warn">${m.length}</span></button>`).join('')}</div>${da.length > 8 ? `<p class="note">Altre ${da.length - 8} schede da completare.</p>` : ''}`
     : `<div class="empty">Tutte le anagrafiche hanno i dati principali.</div>`;
-  $('#storeNote').textContent = DBNS ? 'Clienti, contabilità e dichiarazioni Redditi SP, SC, ENC, IRAP, IVA e LIPE sono nell’archivio condiviso del portale; Redditi PF e Modello F24 salvano nel browser di questo dispositivo (usa le loro esportazioni JSON per le copie).'
+  $('#storeNote').textContent = DBNS ? 'Clienti, contabilità, bilanci, dichiarazioni e deleghe F24 sono nell’archivio condiviso del portale: li vedi uguali su tutti i dispositivi collegati. Le modifiche fatte su un altro dispositivo arrivano entro pochi secondi.'
     : 'Archivio condiviso non disponibile in questa vista: i dati restano nel browser di questo dispositivo.';
 }
 $('#pg-home').addEventListener('click', async e => {
@@ -1550,8 +1550,49 @@ async function avvio() {
     CL.use('downloads').then(x => { window.SUITE_DL = x; }).catch(() => {});
     try { DBNS = await CL.use('db'); } catch (e) { DBNS = null; }
   }
-  if (DBNS) { await studioCarica(); cliSub(); } else cliLocale();
+  if (DBNS) { await studioCarica(); cliSub(); avviaSincronia(); } else cliLocale();
   aggiorna();
+}
+/* ---------------- sincronia degli archivi che i moduli tengono nel browser (Modello F24, Redditi PF) con l'archivio condiviso ----------------
+   Ogni voce dell'archivio locale diventa un documento; la copia di riferimento dell'ultima sincronia decide chi ha modificato cosa:
+   una voce cambiata qui va nel cloud, una voce cambiata altrove sostituisce quella locale se qui non è stata toccata. */
+const SINCRO = [['f24-archivio-v1', 'pt_f24_archivio'], ['rpf26_archivio', 'pt_pf_archivio']];
+const idSicuro = k => String(k).replace(/[^A-Za-z0-9_\-.:@+]/g, c => '~' + c.charCodeAt(0).toString(16) + '~').slice(0, 190);
+function avviaSincronia() { for (const [k, c] of SINCRO) try { sincronizza(k, c); } catch (e) { console.warn('Sincronia', k, e); } }
+function sincronizza(key, coll) {
+  const SK = key + '::sincronia', col = DBNS.collection(coll), firma = v => JSON.stringify(v);
+  const esempio = v => !!(v && typeof v === 'object' && (v.esempio || v.example));
+  let inCorso = false, ancora = false, ultimaFirma = '';
+  async function invia() {
+    if (inCorso) { ancora = true; return; } inCorso = true;
+    try {
+      do {
+        ancora = false;
+        const L = ls(key) || {}, S0 = ls(SK) || {}, S1 = { ...S0 };
+        for (const [k, v] of Object.entries(L)) { if (esempio(v)) continue; const f = firma(v); if (S0[k] !== f) { await dbRiprova(() => col.doc(idSicuro(k)).set(dbPulito({ _k: k, v }))); S1[k] = f; } }
+        for (const k of Object.keys(S0)) if (!(k in L)) { await dbRiprova(() => col.doc(idSicuro(k)).delete()); delete S1[k]; }
+        lsSet(SK, S1); ultimaFirma = firma(L);
+      } while (ancora);
+    } catch (e) { console.warn('Sincronia non riuscita', key, e); }
+    finally { inCorso = false; }
+  }
+  function ricevi(docs) {
+    const L = ls(key) || {}, S0 = ls(SK) || {}, S1 = { ...S0 }, remoti = new Map();
+    for (const d of docs) if (d && d._k !== undefined) remoti.set(d._k, d.v);
+    let cambiato = false;
+    for (const [k, v] of remoti) {
+      const f = firma(v), loc = k in L ? firma(L[k]) : undefined;
+      if (loc === f) { S1[k] = f; continue; }
+      if (loc === undefined ? !(k in S0) : loc === S0[k]) { L[k] = v; S1[k] = f; cambiato = true; }
+    }
+    for (const k of Object.keys(S0)) if (!remoti.has(k) && k in L && firma(L[k]) === S0[k]) { delete L[k]; delete S1[k]; cambiato = true; }
+    if (cambiato) { lsSet(key, L); MD = null; try { aggiorna(); } catch (e) {} }
+    lsSet(SK, S1);
+    invia();
+  }
+  try { col.limit(1000).onSnapshot(s => ricevi(s.docs.map(d => d.data())), e => console.warn('Sincronia', key, e)); } catch (e) { console.warn('Sincronia', key, e); }
+  window.addEventListener('storage', e => { if (e.key === key) setTimeout(invia, 300); });
+  setInterval(() => { try { if (firma(ls(key) || {}) !== ultimaFirma) invia(); } catch (e) {} }, 5000);
 }
 /* ---------------- archivio: esportazione e importazione (Portale pubblicato ⇄ file sul computer) ---------------- */
 const ARCH_LS = { ord: 'sandalia-ordinaria-v1', semp: 'sandalia-semplificata-v1', forf: 'sandalia-forfettaria-v1' };
