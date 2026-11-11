@@ -2171,6 +2171,243 @@ async function init() {
 init();
 </script>
 
+<script>/*STAMPA-PDF*/
+/* ======================= STAMPA E PDF DELLA SEZIONE APERTA =======================
+   Modulo comune a contabilità e portale. «Stampa» apre la finestra di stampa del browser con la sola sezione visibile
+   (da lì si può anche scegliere «Salva come PDF»); «PDF» genera direttamente il file con jsPDF, utile dove la finestra
+   di stampa è bloccata (anteprime incorporate). Configurazione facoltativa in window.STAMPA_CFG:
+   { app(), soggetto(), anno(), sezione(), pannello(), barra(), nessunPulsante } */
+(() => {
+  if (window.SANDALIA_STAMPA) return;
+  const LIB = ["https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"];
+  let libP = null;
+  const script = u => new Promise((ok, ko) => { const s = document.createElement("script"); s.src = u; s.onload = ok; s.onerror = () => ko(new Error("libreria PDF non raggiungibile: controlla la connessione")); document.head.appendChild(s); });
+  const carica = () => { if (!libP) libP = (async () => { for (const u of LIB) await script(u); })().catch(e => { libP = null; throw e; }); return libP; };
+  const C = () => window.STAMPA_CFG || {};
+  const vis = el => { if (!el || el.closest("[hidden]")) return false; const s = getComputedStyle(el); return s.display !== "none" && s.visibility !== "hidden"; };
+  const pannello = () => (C().pannello && C().pannello()) || [...document.querySelectorAll(".panel, section.page")].find(vis) || document.querySelector("main") || document.body;
+  const selTesto = q => { const e = document.querySelector(q); return e && e.selectedIndex >= 0 && e.options[e.selectedIndex] ? e.options[e.selectedIndex].text.trim() : ""; };
+  const tabAttiva = () => { const t = document.querySelector('.tab[aria-selected="true"]'); if (!t) return ""; const c = t.cloneNode(true); c.querySelectorAll(".count,svg").forEach(x => x.remove()); return c.textContent.trim(); };
+  function info() {
+    const c = C(), p = pannello();
+    return {
+      app: (c.app && c.app()) || document.title || "Sandalia",
+      sez: (c.sezione && c.sezione()) || document.querySelector("#pg-title")?.textContent.trim() || p.querySelector("h1")?.textContent.trim() || tabAttiva() || "",
+      sog: ((c.soggetto && c.soggetto()) || selTesto("#sel-az") || selTesto("#sel-cliente") || "").replace(/^Nessun[ao]? .*/i, ""),
+      anno: (c.anno && c.anno()) || document.querySelector("#sel-anno")?.value || ""
+    };
+  }
+  const oggi = () => new Date().toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+  /* ---------- testo leggibile di un elemento (valori dei campi compresi) ---------- */
+  const EXTRA = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ";
+  const MAPPA = { "−": "-", "≤": "<=", "≥": ">=", "✓": "ok", "✔": "ok", "✗": "x", "→": "->", "←": "<-", "↗": "", "↘": "", "≈": "~", " ": " ", " ": " ", " ": " ", "​": "", "﻿": "" };
+  const winAnsi = s => [...s].map(ch => MAPPA[ch] ?? ((ch.charCodeAt(0) < 256 || EXTRA.includes(ch)) ? ch : "")).join("");
+  const pulisci = s => winAnsi(String(s || "")).split("\n").map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
+  function valoreCampo(o) {
+    if (!o) return "";
+    if (o.tagName === "SELECT") return o.selectedIndex >= 0 && o.options[o.selectedIndex] ? o.options[o.selectedIndex].text : "";
+    if (o.type === "checkbox" || o.type === "radio") return o.checked ? "Sì" : "No";
+    if (o.type === "file" || o.type === "hidden" || o.type === "password") return "";
+    return o.value || "";
+  }
+  function testo(el) {
+    if (!el) return "";
+    const cl = el.cloneNode(true);
+    const oc = el.querySelectorAll("input,select,textarea"), cc = cl.querySelectorAll("input,select,textarea");
+    cc.forEach((x, i) => { const o = oc[i]; const v = o && o.type !== "checkbox" && o.type !== "radio" ? valoreCampo(o) : ""; x.replaceWith(document.createTextNode(v ? ` ${v} ` : "")); });
+    const od = el.querySelectorAll("details"), cd = cl.querySelectorAll("details");
+    cd.forEach((d, i) => { if (od[i] && !od[i].open) d.remove(); else d.querySelector("summary")?.remove(); });
+    cl.querySelectorAll("button,script,style,svg,datalist,template,[hidden],.no-print").forEach(x => x.remove());
+    cl.querySelectorAll("br").forEach(x => x.replaceWith("\n"));
+    cl.querySelectorAll("div,p,li,tr,h1,h2,h3,h4").forEach(x => { x.before("\n"); x.after("\n"); });
+    return pulisci(cl.textContent);
+  }
+
+  /* ---------- dalla pagina ai blocchi del PDF ---------- */
+  function tabella(t) {
+    const righe = sez => sez ? [...sez.rows].filter(vis) : [];
+    const cel = tr => [...tr.cells].filter(c => getComputedStyle(c).display !== "none").map(c => ({ s: testo(c), num: c.classList.contains("num"), span: c.colSpan || 1 }));
+    let H = righe(t.tHead).map(cel), B = [...t.tBodies].flatMap(righe).map(cel), F = righe(t.tFoot).map(cel);
+    if (!t.tHead && !t.tBodies.length) B = [...t.rows].filter(vis).map(cel);
+    const tutte = [...H, ...B, ...F];
+    if (!tutte.length) return null;
+    const ncol = Math.max(...tutte.map(r => r.reduce((a, c) => a + c.span, 0)));
+    // colonne senza testo (caselle di selezione, pulsanti): si tolgono
+    const drop = new Set();
+    for (let i = 0; i < ncol; i++) {
+      let vuota = true;
+      for (const r of tutte) { let p = 0; for (const c of r) { if (p === i && c.span === 1 && c.s) vuota = false; p += c.span; } }
+      if (vuota) drop.add(i);
+    }
+    const taglia = r => { const o = []; let p = 0; for (const c of r) { let k = 0; for (let j = p; j < p + c.span; j++) if (drop.has(j)) k++; if (k < c.span) o.push({ ...c, span: c.span - k }); p += c.span; } return o; };
+    H = H.map(taglia).filter(r => r.length); B = B.map(taglia).filter(r => r.some(c => c.s)); F = F.map(taglia).filter(r => r.some(c => c.s));
+    const n = ncol - drop.size;
+    if (!n || (!B.length && !F.length)) return null;
+    // allineamento a destra per le colonne numeriche (dal corpo)
+    const numCol = new Set();
+    for (const r of B) { let p = 0; for (const c of r) { if (c.num && c.span === 1) numCol.add(p); p += c.span; } }
+    return { t: "tab", H, B, F, n, numCol };
+  }
+  function blocchi(root) {
+    const out = []; let campi = [];
+    const flush = () => { if (campi.length) { out.push({ t: "kv", righe: campi }); campi = []; } };
+    const emetti = b => { flush(); out.push(b); };
+    const salta = el => el.matches("script,style,template,dialog,button,svg,canvas,img,datalist,input,select,textarea,.drop,.no-print,.hint,.note,.acts,.bulk-bar,.ed-row,.loading,.stampa-btns,.stampa-int");
+    const visita = el => {
+      if (el.nodeType !== 1 || salta(el) || !vis(el)) return;
+      if (el.tagName === "DETAILS" && !el.open) return;
+      if (el.tagName === "SUMMARY") { const t = testo(el); if (t) emetti({ t: "h", s: t, l: 4 }); return; }
+      if (el.tagName === "TABLE") { const t = tabella(el); if (t) emetti(t); return; }
+      if (/^H[1-4]$/.test(el.tagName)) { const t = testo(el); if (t) emetti({ t: "h", s: t, l: +el.tagName[1] }); return; }
+      if (el.matches(".kpis")) {
+        const r = [...el.children].filter(vis).map(k => [testo(k.querySelector(".l")), testo(k.querySelector(".v")), testo(k.querySelector(".s"))]).filter(r => r[0] || r[1]);
+        if (r.length) emetti({ t: "kv", righe: r }); return;
+      }
+      if (el.matches(".lm")) {
+        const r = [...el.children].filter(vis).map(d => { const sp = [...d.children].filter(vis); return sp.length >= 2 ? [testo(sp[0]), sp.slice(1).map(testo).filter(Boolean).join(" ")] : [testo(d), ""]; }).filter(r => r[0] || r[1]);
+        if (r.length) emetti({ t: "kv", righe: r }); return;
+      }
+      if (el.matches(".fld")) {
+        const ctrl = el.querySelector("input:not([type=file]):not([type=hidden]),select,textarea");
+        if (!ctrl) { for (const c of el.children) visita(c); return; }
+        const lab = el.cloneNode(true); lab.querySelectorAll("input,select,textarea,button,.sub,datalist,svg").forEach(x => x.remove());
+        const l = pulisci(lab.textContent), v = pulisci(valoreCampo(ctrl)), sub = pulisci(el.querySelector(".sub")?.textContent || "");
+        if (l) campi.push([l, [v || "–", sub].filter(Boolean).join(" · ")]);
+        return;
+      }
+      if (el.matches(".notice, .banner, .msg, .lead, p, .anom, .err-box")) { const t = testo(el); if (t) emetti({ t: "p", s: t }); return; }
+      const figli = [...el.children];
+      if (!figli.length) { const t = testo(el); if (t && t.length > 1) emetti({ t: "p", s: t }); return; }
+      for (const c of figli) visita(c);
+    };
+    visita(root); flush();
+    return out;
+  }
+
+  /* ---------- PDF ---------- */
+  async function pdf() {
+    avviso("Preparazione del PDF…");
+    try {
+      await carica();
+      const { jsPDF } = window.jspdf, I = info(), root = pannello(), B = blocchi(root);
+      if (!B.length) { avviso("Questa sezione non contiene dati da stampare.", true); return; }
+      const larga = B.some(b => b.t === "tab" && b.n > 7);
+      const doc = new jsPDF({ orientation: larga ? "landscape" : "portrait", unit: "mm", format: "a4", compress: true });
+      const W = doc.internal.pageSize.getWidth(), Hh = doc.internal.pageSize.getHeight(), M = 12, TOP = 24, BOT = 14;
+      let y = TOP;
+      const spazio = h => { if (y + h > Hh - BOT) { doc.addPage(); y = TOP; } };
+      const titolo = [I.sez, I.sog, I.anno ? `esercizio ${I.anno}` : ""].filter(Boolean).join(" · ");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(20);
+      const tl = doc.splitTextToSize(winAnsi(titolo || I.app), W - 2 * M); spazio(tl.length * 6); doc.text(tl, M, y + 4); y += tl.length * 6.2 + 3;
+      const base = { margin: { left: M, right: M, top: TOP, bottom: BOT }, styles: { font: "helvetica", fontSize: 8.4, cellPadding: 1.6, overflow: "linebreak", textColor: 25, lineColor: 205, lineWidth: 0.1 }, headStyles: { fillColor: [232, 238, 243], textColor: 25, fontStyle: "bold" }, footStyles: { fillColor: [245, 247, 249], textColor: 25, fontStyle: "bold" }, theme: "grid" };
+      for (const b of B) {
+        if (b.t === "h") {
+          spazio(b.l <= 2 ? 12 : 9);
+          doc.setFont("helvetica", "bold"); doc.setFontSize(b.l <= 2 ? 12 : 10); doc.setTextColor(20);
+          const l = doc.splitTextToSize(b.s, W - 2 * M); y += b.l <= 2 ? 3 : 1.5; doc.text(l, M, y + 3.5); y += l.length * (b.l <= 2 ? 5.4 : 4.6) + 1.5;
+        } else if (b.t === "p") {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(60);
+          for (const l of doc.splitTextToSize(b.s, W - 2 * M)) { spazio(4.2); doc.text(l, M, y + 3); y += 4.1; }
+          y += 1.5;
+        } else if (b.t === "kv") {
+          doc.autoTable({ ...base, startY: y, theme: "plain", body: b.righe, styles: { ...base.styles, cellPadding: { top: 1.2, bottom: 1.2, left: 1.5, right: 1.5 } },
+            columnStyles: { 0: { cellWidth: Math.min(70, (W - 2 * M) * 0.42), textColor: 80 }, 1: { fontStyle: "bold" }, 2: { textColor: 100, fontSize: 7.8 } },
+            didDrawCell: d => { if (d.section === "body" && d.column.index === 0) { doc.setDrawColor(225); doc.line(M, d.cell.y + d.cell.height, W - M, d.cell.y + d.cell.height); } } });
+          y = doc.lastAutoTable.finalY + 4;
+        } else if (b.t === "tab") {
+          const conv = (r, sez) => { let p = 0; return r.map(c => { const o = { content: c.s, colSpan: c.span, styles: {} }; if ((sez !== "head" && (c.num || (c.span === 1 && b.numCol.has(p)))) || (sez === "head" && c.span === 1 && b.numCol.has(p))) o.styles.halign = "right"; p += c.span; return o; }); };
+          doc.autoTable({ ...base, startY: y, head: b.H.map(r => conv(r, "head")), body: b.B.map(r => conv(r, "body")), foot: b.F.map(r => conv(r, "foot")), showHead: "everyPage", showFoot: "lastPage", rowPageBreak: "avoid" });
+          y = doc.lastAutoTable.finalY + 5;
+        }
+      }
+      const n = doc.internal.getNumberOfPages(), testa = winAnsi([I.app, I.sog, I.anno].filter(Boolean).join(" · ")), sez = winAnsi(I.sez);
+      for (let i = 1; i <= n; i++) {
+        doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6); doc.setTextColor(110);
+        doc.text(doc.splitTextToSize(testa, W - 2 * M - 40)[0] || "", M, 10); doc.text(sez, W - M, 10, { align: "right" });
+        doc.setDrawColor(200); doc.line(M, 12.5, W - M, 12.5);
+        doc.text(`Stampato il ${oggi()}`, M, Hh - 7); doc.text(`Pagina ${i} di ${n}`, W - M, Hh - 7, { align: "right" });
+      }
+      const nome = [I.sez, I.sog, I.anno].filter(Boolean).join("_").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "stampa";
+      const esito = await salva(doc.output("blob"), `${nome}.pdf`);
+      avviso(esito === "annullato" ? "Salvataggio annullato." : `PDF pronto: ${nome}.pdf`, esito === "annullato");
+    } catch (e) { avviso(`PDF non riuscito: ${e.message || e}`, true); }
+  }
+  async function salva(blob, nome) {
+    try {
+      const d = window.claude && window.claude.use ? await Promise.race([window.claude.use("downloads"), new Promise(r => setTimeout(() => r(null), 3000))]) : null;
+      if (d) { await d.save({ filename: nome, data: blob }); return "salvato"; }
+    } catch (e) { if (e && e.code === "declined") return "annullato"; }
+    const u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = nome; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 15000);
+    return "scaricato";
+  }
+
+  /* ---------- stampa dal browser ---------- */
+  const CSS = `
+.stampa-btns{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.stampa-btns .btn{display:inline-flex;align-items:center;gap:6px}
+.stampa-btns svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.stampa-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483000;max-width:min(560px,calc(100vw - 32px));padding:10px 14px;border-radius:10px;background:#13222b;color:#fff;font:500 13px/1.4 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.stampa-toast.err{background:#8a2119}
+.stampa-int{display:none}
+@media print{
+  @page{size:A4;margin:12mm}
+  html.stampa-on,html.stampa-on body{background:#fff!important;color:#000!important;color-scheme:light!important}
+  html.stampa-on body *:not(.stampa-asse):not(.stampa-root):not(.stampa-root *){display:none!important}
+  html.stampa-on .stampa-asse{display:block!important;position:static!important;overflow:visible!important;height:auto!important;min-height:0!important;max-height:none!important;width:auto!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:#fff!important;grid-template-columns:none!important}
+  html.stampa-on .stampa-root{display:block!important;position:static!important;width:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
+  html.stampa-on .stampa-root *{color:#000!important;background:transparent!important;box-shadow:none!important;border-color:#bbb!important;text-shadow:none!important}
+  html.stampa-on .stampa-root button,html.stampa-on .stampa-root .drop,html.stampa-on .stampa-root input[type=file],html.stampa-on .stampa-root .acts,html.stampa-on .stampa-root .hint,html.stampa-on .stampa-root .bulk-bar,html.stampa-on .stampa-root input[type=checkbox],html.stampa-on .stampa-root .no-print,html.stampa-on .stampa-root dialog{display:none!important}
+  html.stampa-on .stampa-root .tbl-wrap,html.stampa-on .stampa-root .tw{overflow:visible!important;max-height:none!important}
+  html.stampa-on .stampa-root table{font-size:8.5pt!important;width:100%!important}
+  html.stampa-on .stampa-root tr{break-inside:avoid}
+  html.stampa-on .stampa-root input,html.stampa-on .stampa-root select,html.stampa-on .stampa-root textarea{border:0!important;padding:0!important;appearance:none!important;-webkit-appearance:none!important;font:inherit!important}
+  html.stampa-on .stampa-root .card{border:1px solid #ccc!important;break-inside:auto;margin-bottom:8px!important}
+  html.stampa-on .stampa-int{display:block!important;margin:0 0 10px!important;padding:0 0 6px!important;border-bottom:1px solid #999!important;font:12pt/1.3 Helvetica,Arial,sans-serif}
+  html.stampa-on .stampa-int b{font-size:14pt}
+}`;
+  const st = document.createElement("style"); st.textContent = CSS; (document.head || document.documentElement).appendChild(st);
+  let tToast = null;
+  function avviso(t, err) {
+    let el = document.querySelector(".stampa-toast");
+    if (!el) { el = document.createElement("div"); el.className = "stampa-toast"; el.setAttribute("role", "status"); document.body.appendChild(el); }
+    el.textContent = t; el.classList.toggle("err", !!err); el.hidden = false;
+    clearTimeout(tToast); tToast = setTimeout(() => { el.hidden = true; }, err ? 7000 : 4500);
+  }
+  function stampa() {
+    const root = pannello(), I = info(), asse = [];
+    for (let p = root.parentElement; p && p !== document.documentElement; p = p.parentElement) { p.classList.add("stampa-asse"); asse.push(p); }
+    root.classList.add("stampa-root");
+    const int = document.createElement("div"); int.className = "stampa-int";
+    int.innerHTML = `<b></b><div></div>`; int.querySelector("b").textContent = [I.sez, I.sog].filter(Boolean).join(" · ") || I.app; int.querySelector("div").textContent = [I.app, I.anno ? `esercizio ${I.anno}` : "", `stampato il ${oggi()}`].filter(Boolean).join(" · ");
+    root.prepend(int);
+    document.documentElement.classList.add("stampa-on");
+    const fine = () => { document.documentElement.classList.remove("stampa-on"); root.classList.remove("stampa-root"); asse.forEach(p => p.classList.remove("stampa-asse")); int.remove(); };
+    const t0 = performance.now(); let ko = false;
+    try { window.print(); } catch (e) { ko = true; }
+    const dt = performance.now() - t0;
+    setTimeout(fine, 400);
+    if (ko || (dt < 40 && window.top !== window.self)) avviso("Se la finestra di stampa non si è aperta, usa il pulsante «PDF»: prepara il file da salvare o stampare.");
+  }
+
+  /* ---------- pulsanti ---------- */
+  const ICO_P = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg>`;
+  const ICO_F = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/></svg>`;
+  function pulsanti() {
+    if (C().nessunPulsante || document.querySelector(".stampa-btns")) return;
+    const barra = (C().barra && C().barra()) || document.querySelector("header.top > div:first-child") || document.querySelector("header.top");
+    if (!barra) return;
+    const box = document.createElement("div"); box.className = "stampa-btns";
+    box.innerHTML = `<button type="button" class="btn small" data-stampa="print" title="Stampa la sezione aperta (dalla finestra di stampa puoi anche salvare in PDF)">${ICO_P}<span>Stampa</span></button><button type="button" class="btn small" data-stampa="pdf" title="Salva la sezione aperta in un file PDF">${ICO_F}<span>PDF</span></button>`;
+    box.addEventListener("click", e => { const b = e.target.closest("[data-stampa]"); if (!b) return; b.dataset.stampa === "pdf" ? pdf() : stampa(); });
+    barra.appendChild(box);
+  }
+  window.SANDALIA_STAMPA = { stampa, pdf, info };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", pulsanti); else pulsanti();
+})();
+
+/*/STAMPA-PDF*/</script>
 <script>
 /* Portale Studio Sandalia – collegamenti della Contabilità Forfettaria con il portale (attivi solo dentro il portale) */
 (function () {
