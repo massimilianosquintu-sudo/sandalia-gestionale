@@ -813,6 +813,38 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
   <!-- RIPRESA SALDI -->
   <section class="panel" id="tab-rip" hidden>
     <div class="notice" id="rip-fatta" hidden></div>
+    <div class="card" id="blu-card">
+      <div class="row"><h2>Importa la contabilità da Blustring</h2><span class="spacer"></span><button class="btn small" id="blu-svuota" type="button">Ricomincia</button></div>
+      <p class="note">Carica i file esportati da Blustring: mastrino giornale (XLS) e libro giornale (CSV) sono necessari, perché il mastrino numera le registrazioni e il CSV riporta gli importi in dare. Piano dei conti, bilancio di verifica, partitari e registro cespiti completano l'importazione: saldi al 1° gennaio, abbinamenti di incassi e pagamenti, cespiti e controllo dei saldi.</p>
+      <div class="drop" id="drop-blu" tabindex="0" role="button" aria-label="Seleziona i file esportati da Blustring">
+        <strong>Trascina qui i file esportati da Blustring</strong>
+        <span class="hint">Puoi selezionarli tutti insieme: ognuno viene riconosciuto dal contenuto</span>
+        <div class="formats"><span>XLS</span><span>CSV</span></div>
+      </div>
+      <input type="file" id="in-blu" hidden multiple accept=".xls,.xlsx,.csv,.txt">
+      <p class="hint" id="blu-msg" role="status"></p>
+      <div class="lm" id="blu-file"></div>
+      <details id="blu-conti-box" class="blu-det" hidden>
+        <summary id="blu-conti-sum">Corrispondenza con il piano dei conti S1</summary>
+        <div class="row" style="margin-top:8px"><span class="hint">Controlla i collegamenti proposti; puoi cambiarli cercando il conto per codice o descrizione.</span><span class="spacer"></span><button class="btn small" id="blu-agente" type="button">Proponi le mancanti con l'agente</button></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Conto Blustring</th><th>Conto del piano S1</th><th class="num">Movimenti dell'anno</th><th class="num" id="blu-th-sp">Saldo</th></tr></thead>
+          <tbody id="blu-conti-body"></tbody>
+        </table></div>
+        <p class="note">Clienti e fornitori di Blustring diventano anagrafiche collegate ai conti 11.03.01 e 33.03.01. Le corrispondenze scelte restano memorizzate per l'azienda.</p>
+      </details>
+      <style>
+        #blu-card{min-width:0}
+        #blu-card .lm>div{flex-wrap:wrap;gap:2px 14px;min-width:0}
+        #blu-card .lm>div>span{min-width:0;overflow-wrap:anywhere}
+        #blu-card .lm .mono{text-align:right}
+        #blu-msg{overflow-wrap:anywhere}
+        .blu-det{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:12px}
+        .blu-det>summary{cursor:pointer;font-weight:600}
+      </style>
+      <div class="lm" id="blu-riepilogo" style="margin-top:10px"></div>
+      <div class="row"><button class="btn pri" id="blu-importa" type="button" disabled>Importa nella contabilità</button><span class="hint" id="blu-imp-msg" role="status"></span></div>
+    </div>
     <div class="card">
       <h2>1 · Data e tipo di ripresa</h2>
       <div class="formgrid">
@@ -1233,11 +1265,24 @@ function subAzienda() {
   if (!S.aziendaId) return renderAll();
   S.unsub.push(S.db.collection("pdc").where("scope", "==", S.aziendaId).limit(1000).onSnapshot(s => { pdcAz = s.docs.map(d => ({ id: d.id, ...d.data() })); aggiornaPdcOv(); }, () => {}));
   S.unsub.push(S.db.collection("anagrafiche").where("aziendaId", "==", S.aziendaId).limit(1000).onSnapshot(s => { S.anag = s.docs.map(d => ({ id: d.id, ...d.data() })); renderAll(); }, () => {}));
-  const parti = { cur: [[], [], [], []], prec: [[], [], [], []] };
-  const unisci = () => { S.regs = parti.cur.flat(); S.regsPrec = parti.prec.flat(); renderAll(); };
+  const parti = { cur: [[], [], [], []], prec: [[], [], [], []] }, mesi = { cur: {}, prec: {} };
+  const unisci = () => {
+    const u = k => { const m = new Map(); for (const r of parti[k].flat()) m.set(r.id, r); for (const l of Object.values(mesi[k])) for (const r of l) m.set(r.id, r); return [...m.values()]; };
+    S.regs = u("cur"); S.regsPrec = u("prec"); renderAll();
+  };
   for (const [k, anno] of [["cur", S.anno], ["prec", S.anno - 1]]) for (let t = 1; t <= 4; t++) {
+    let perMese = false;
     S.unsub.push(S.db.collection("registrazioni").where("aziendaId", "==", S.aziendaId).where("anno", "==", anno).where("trim", "==", t).limit(1000)
-      .onSnapshot(s => { parti[k][t - 1] = s.docs.map(d => ({ id: d.id, ...d.data() })); if (s.size >= 1000) log("Archivio", `Più di 1000 registrazioni nel ${t}° trimestre ${anno}: alcune non sono visualizzate`, "err"); unisci(); }, () => {}));
+      .onSnapshot(s => {
+        parti[k][t - 1] = s.docs.map(d => ({ id: d.id, ...d.data() }));
+        // trimestre con più di 1000 registrazioni: si leggono anche mese per mese (campo "mese")
+        if (s.size >= 1000 && !perMese) {
+          perMese = true;
+          for (let m = t * 3 - 2; m <= t * 3; m++) S.unsub.push(S.db.collection("registrazioni").where("aziendaId", "==", S.aziendaId).where("anno", "==", anno).where("mese", "==", m).limit(1000)
+            .onSnapshot(q => { mesi[k][m] = q.docs.map(d => ({ id: d.id, ...d.data() })); if (q.size >= 1000) log("Archivio", `Più di 1000 registrazioni nel mese ${m}/${anno}: alcune non sono visualizzate`, "err"); unisci(); }, () => {}));
+        }
+        unisci();
+      }, () => {}));
   }
   renderAll();
 }
@@ -1766,7 +1811,7 @@ async function registraProposta(p) {
   await ricordaConto(reg);
 }
 async function salvaReg(reg) {
-  reg.aziendaId = S.aziendaId; reg.anno = Number(reg.dataReg.slice(0, 4)); reg.trim = trimDi(reg.dataReg);
+  reg.aziendaId = S.aziendaId; reg.anno = Number(reg.dataReg.slice(0, 4)); reg.trim = trimDi(reg.dataReg); reg.mese = Number(reg.dataReg.slice(5, 7));
   reg.chiave = reg.chiave || chiaveDi(reg); reg.creato = reg.creato || new Date().toISOString();
   delete reg.contoDa;
   await store.put("registrazioni", reg);
@@ -2018,7 +2063,7 @@ function apriTab(t) {
 }
 function renderTab() {
   if (S.tab === "pn") renderPN(); else if (S.tab === "par") renderPar(); else if (S.tab === "iva") { renderIVA(); renderLipe(); }
-  else if (S.tab === "bil") renderBil(); else if (S.tab === "pdc") renderPdc(); else if (S.tab === "rip") renderRip(); else if (S.tab === "dic") renderDic(); else if (S.tab === "sca") renderSca(); else if (S.tab === "ban") renderBan(); else if (S.tab === "pag") renderPaghe(); else if (S.tab === "f24") renderF24(); else if (S.tab === "cas") renderCassa(); else if (S.tab === "ces") renderCespiti(); else if (S.tab === "chi") renderChiusura();
+  else if (S.tab === "bil") renderBil(); else if (S.tab === "pdc") renderPdc(); else if (S.tab === "rip") { renderRip(); renderBlu(); } else if (S.tab === "dic") renderDic(); else if (S.tab === "sca") renderSca(); else if (S.tab === "ban") renderBan(); else if (S.tab === "pag") renderPaghe(); else if (S.tab === "f24") renderF24(); else if (S.tab === "cas") renderCassa(); else if (S.tab === "ces") renderCespiti(); else if (S.tab === "chi") renderChiusura();
 }
 function renderAcqKpi() {
   const el = $("#acq-kpi"), az = aziendaCorrente();
@@ -3117,7 +3162,7 @@ function renderRip() {
   const az = aziendaCorrente(), fatta = az?.ripresa;
   const nf = $("#rip-fatta");
   nf.hidden = !fatta;
-  if (fatta) nf.innerHTML = `<div class="row"><span><strong>Ripresa saldi registrata</strong> · ${fatta.tipo === "apertura" ? "apertura dell'esercizio" : "in corso d'anno"} al ${itDate(fatta.data)} · ${fatta.nReg} ${fatta.nReg === 1 ? "registrazione" : "registrazioni"}${fatta.file ? ` · da ${esc(fatta.file)}` : ""}</span><span class="spacer"></span><button class="btn small" type="button" id="rip-annulla">${ripConferma ? "Conferma: elimina le registrazioni della ripresa" : "Annulla la ripresa"}</button></div>`;
+  if (fatta) nf.innerHTML = `<div class="row"><span><strong>${fatta.blustring ? "Contabilità importata da Blustring" : "Ripresa saldi registrata"}</strong> · ${fatta.blustring ? "registrazioni fino" : fatta.tipo === "apertura" ? "apertura dell'esercizio" : "in corso d'anno"} al ${itDate(fatta.data)} · ${fatta.nReg} ${fatta.nReg === 1 ? "registrazione" : "registrazioni"}${fatta.file ? ` · da ${esc(fatta.file)}` : ""}</span><span class="spacer"></span><button class="btn small" type="button" id="rip-annulla">${ripConferma ? "Conferma: elimina le registrazioni della ripresa" : fatta.blustring ? "Annulla l'importazione" : "Annulla la ripresa"}</button></div>`;
   for (const [id, k] of [["#rip-tipo", "tipo"], ["#rip-data", "data"], ["#rip-cred", "credIva"]]) if (document.activeElement !== $(id)) $(id).value = RIP[k] || "";
   const t = ripTotali();
   $("#rip-saldi-body").innerHTML = RIP.saldi.length ? RIP.saldi.map(s => {
@@ -3227,12 +3272,13 @@ async function annullaRipresa() {
   const az = aziendaCorrente(); if (!az?.ripresa) return;
   const rid = az.ripresa.id;
   if (az.ripresa.anno !== S.anno && az.ripresa.anno !== S.anno - 1) return ripMsg(`Seleziona l'esercizio ${az.ripresa.anno} per annullare la ripresa`, "err");
-  const regs = tutteRegs().filter(r => r.ripresaId === rid);
-  const abb = regs.filter(r => r.partita && abbinatoA(r.id) !== 0);
+  const regs = tutteRegs().filter(r => r.ripresaId === rid), ids = new Set(regs.map(r => r.id));
+  const abb = regs.filter(r => r.partita && tutteRegs().some(x => !ids.has(x.id) && (x.abbinamenti || []).some(a => a.regId === r.id)));
   if (abb.length) { ripConferma = false; renderRip(); return ripMsg(`${abb.length} ${abb.length === 1 ? "partita ripresa è già abbinata" : "partite riprese sono già abbinate"} a incassi o pagamenti: elimina prima quegli abbinamenti`, "err"); }
   ripMsg("Eliminazione delle registrazioni della ripresa…", "work");
-  for (const r of regs) await store.del("registrazioni", r.id);
+  await bluElimina(ids);
   const { ripresa, ...resto } = aziendaCorrente();
+  resto.cespiti = (resto.cespiti || []).filter(c => c.ripresaId !== rid);
   await store.put("aziende", resto);
   ripConferma = false;
   log("Ripresa saldi", `Ripresa annullata: ${regs.length} registrazioni eliminate`, "ok");
@@ -5058,6 +5104,523 @@ $("#btn-bil-xbrl").addEventListener("click", async () => {
   try { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([data], { type: "application/json" })); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); fatto("scaricato"); }
   catch { msg("In questa vista lo scaricamento non è disponibile."); }
 });
+
+/* ======================= IMPORTAZIONE DELLA CONTABILITÀ DA BLUSTRING =======================
+   File esportati da Blustring e riconosciuti dal contenuto:
+   - mastrino giornale (XLS): numero, data e descrizione di ogni registrazione, importi solo in avere;
+   - libro giornale (CSV): tutte le righe con dare e avere, senza numero di registrazione;
+   - piano dei conti, bilancio di verifica (conto economico e stato patrimoniale), partitari clienti e fornitori, registro cespiti.
+   Il mastrino dà la struttura delle registrazioni, il CSV gli importi in dare che il mastrino non riporta. */
+const BLU_S1 = {"360400":"71.01.51.95","unicre":"19.01.01","31065a":"63.05.90","410110":"47.11.03","250345":"35.01.03","115260":"35.05.51","25061a":"39.05.51","315020":"65.01.05.99","210210":"31.03.15","355300":"75.01.07","250225":"39.05.03","250200":"39.07.01","13050a":"19.03.05","350130":"59.01.05","250330":"35.03.01","250430":"37.01.01","25043c":"37.01.03","250450":"37.01.15","350100":"63.05.13.99","31031a":"61.05.11.99","21002a":"31.03.51","ammcon":"61.05.11.99","250325":"35.03.05","250610":"39.05.51","355200":"75.03.09","36049a":"71.03.03","250410":"37.01.05","310000":"67.01.01.99","310180":"67.01.03.99","31018b":"67.01.09.99","310310":"61.05.01.99","365385":"71.03.17","420350":"53.01.29","115245":"35.01.01","leasin":"65.03.07","330510":"63.03.01.99","viaggi":"63.01.13","365100":"71.03.09","30112a":"55.03.01","325100":"59.01.01","301120":"55.07.51","325110":"59.03.01.99","320030":"57.09.03","310720":"61.01.01.03","105030":"05.03.11","301510":"55.07.03","345110":"59.03.15.99","330500":"63.03.03.99","310730":"61.01.11.99","indume":"55.07.23","301410":"55.07.03","serviz":"63.05.11","115250":"35.01.14","36045a":"71.01.90","320100":"57.09.13.99","visite":"67.03.25","310740":"61.01.11.99","32550a":"57.05.01.99","430100":"53.01.19.99","250320":"35.01.11","365350":"55.07.98","355110":"75.01.01","365300":"71.03.51","man20x":"59.03.15.99","carb20":"59.03.01.99","320210":"57.09.17","250440":"37.01.19","noleg1":"65.05.15","nolegg":"65.03.05.99","sertel":"57.09.07","305420":"57.01.01.99","345200":"57.11.07.99","345100":"57.11.07.99","360445":"59.01.11","altrix":"75.03.51","360430":"71.01.07","330210":"63.01.01.99","230010":"29.01.01","250650":"39.05.51","105080":"05.07.15","ivaspl":"35.01.49","250010":"39.01.07","410010":"47.01.03","301100":"55.01.01","301001":"55.01.01","301610":"55.01.09","320010":"57.09.01.99","320020":"57.09.01.99","10507a":"05.07.07","105070":"05.07.01","325500":"57.05.01.99","365380":"63.01.09.99","365120":"57.09.21","105025":"05.03.09","105040":"05.05.51","105060":"05.07.05","105075":"05.07.09","specos":"03.01.01","105405":"15.05.03","115020":"11.03.01","115110":"15.05.03","115215":"35.07.03","115270":"35.05.01","130500":"19.03.03","180200":"21.01.03","250000":"33.03.01","250315":"35.07.01","260010":"41.07.03","260020":"41.09.09","260030":"41.09.07","260050":"41.05.09","260060":"41.09.05","260070":"41.05.11","280000":"23.01.01.99","280110":"25.01.01.99","280300":"23.01.05.99","280315":"23.01.17.99"};
+const BLU_CLI = "115020", BLU_FOR = "250000";   // conti riepilogativi di clienti e fornitori nel bilancio di Blustring
+let BLU = bluVuoto();
+function bluVuoto() { return { file: {}, X: null, C: null, pdc: null, bil: null, part: [], ces: null, mappa: {}, fonteMappa: {}, ric: null, conti: [], ape: null, avvisi: [] }; }
+const bluEnt = s => String(s ?? "").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").trim();
+const bluNc = s => bluEnt(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
+const bluNd = s => bluEnt(s).toUpperCase().replace(/\bAMP\b/g, "").replace(/[^A-Z0-9]/g, "");
+const bluNum = s => { if (typeof s === "number") return s; s = String(s ?? "").trim(); if (!s) return 0; if (/,\d{1,}$/.test(s) || /^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "").replace(",", "."); const n = Number(s); return isFinite(n) ? n : 0; };
+const bluSerial = v => { if (typeof v === "number" && v > 20000) { const d = new Date(Math.round((v - 25569) * 86400000)); return d.toISOString().slice(0, 10); } const m = String(v ?? "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
+const bluMsg = (t, cls) => { const el = $("#blu-msg"); if (el) { el.textContent = t; el.className = "hint " + (cls || ""); } };
+const bluMapKey = () => `sandalia-blu-mappa-${S.aziendaId || "x"}`;
+
+/* ---------- lettura dei file ---------- */
+async function bluFoglio(f) {
+  await caricaLib("xlsx");
+  const wb = window.XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: "array", cellDates: false });
+  const n = wb.SheetNames[0];
+  return { nome: n, righe: window.XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: "" }) };
+}
+function bluTipo(nomeFoglio, righe) {
+  const h = (righe[0] || []).map(x => String(x).trim().toLowerCase());
+  const ha = k => h.includes(k);
+  if (ha("numreg") && ha("idkontogy")) return "giornale";
+  if (ha("kodiceesposto") || ha("kontodeskk")) return "pdc";
+  if (ha("sezionebil") && ha("idkontol3")) return "bilancio";
+  if (ha("totfat2") && ha("pagato3")) return /fornit/i.test(nomeFoglio) ? "partF" : /client/i.test(nomeFoglio) ? "partC" : "part";
+  if (ha("desccespite") && ha("cespitee")) return "cespiti";
+  return "";
+}
+function bluLeggiGiornale(righe) {
+  const regs = []; let cur = null;
+  for (const v of righe.slice(1)) {
+    if (v[0] !== "" && v[0] != null) { cur = { data: bluSerial(v[0]), n: Number(v[1]) || 0, desc: bluEnt(v[2]), tot: bluNum(v[3]), righe: [] }; regs.push(cur); }
+    else if (cur && (String(v[5]).trim() || String(v[6]).trim())) cur.righe.push({ cod: String(v[5]).trim(), dconto: bluEnt(v[6]), avere: v[7] === "" || v[7] == null ? null : bluNum(v[7]) });
+  }
+  return regs;
+}
+function bluLeggiCsv(testo) {
+  const out = [], lines = testo.split(/\r?\n/);
+  if (!/^\s*data\s*;\s*tipo\s*;\s*codice conto/i.test(lines[0] || "")) return null;
+  for (const l0 of lines.slice(1)) {
+    if (!l0.trim()) continue;
+    const f = bluEnt(l0).split(";"); while (f.length && !f[f.length - 1].trim()) f.pop();
+    if (f.length < 7) continue;
+    out.push({ data: bluSerial(f[0]), tipo: f[1].trim().toUpperCase(), cod: f[2].trim(), dconto: f[3].trim(), desc: f.slice(4, -2).join(";").trim(), dare: bluNum(f[f.length - 2]), avere: bluNum(f[f.length - 1]) });
+  }
+  return out;
+}
+function bluLeggiPdc(righe) {
+  const m = {}; let l1 = "", l2 = "";
+  for (const v of righe.slice(1)) {
+    if (String(v[0]).trim()) l1 = bluEnt(v[2]);
+    if (String(v[3]).trim()) l2 = bluEnt(v[5]);
+    const c = String(v[7]).trim(); if (c) m[c] = { sez: String(v[6]).trim().toUpperCase(), l1, l2, d: bluEnt(v[8]) };
+  }
+  return m;
+}
+function bluLeggiBilancio(righe) {
+  const m = {}; let sez = "";
+  for (const v of righe.slice(1)) {
+    if (String(v[0]).trim()) sez = String(v[0]).trim().toUpperCase();
+    const c = String(v[8]).trim(); if (!c) continue;
+    const val = bluNum(v[10]);
+    m[c] = { sez, d: bluEnt(v[9]), val, net: r2(sez === "ATTIVO" || sez === "COSTI" ? val : -val) };   // net: dare positivo
+  }
+  return m;
+}
+function bluLeggiPartite(righe, tipo) {
+  const out = []; let an = null;
+  for (const v of righe.slice(1)) {
+    if (String(v[3]).trim()) { const t = bluEnt(v[3]), m = t.match(/^(\S+)\s+-\s+(.*)$/); an = m ? { cod: m[1], nome: m[2] } : { cod: "", nome: t }; continue; }
+    if (String(v[4]).trim()) {
+      const t = bluEnt(v[4]), m = t.match(/N°\s*(.+?)\s+del\s+(\d{2}\/\d{2}\/\d{4})/i);
+      out.push({ tipo, cod: an?.cod || "", nome: an?.nome || "", nc: /^nota/i.test(t), numero: m ? m[1].trim() : "", data: m ? bluSerial(m[2]) : "", tot: bluNum(v[5]), pag: [] });
+      continue;
+    }
+    const imp = bluNum(v[10]);
+    // importo positivo = riduce il residuo (incasso o pagamento), negativo = lo aumenta (storno)
+    if (out.length && imp && (v[6] !== "" && v[6] != null)) out[out.length - 1].pag.push({ data: bluSerial(v[6]), tipo: String(v[7]).trim(), conto: bluEnt(v[8]), imp: r2(-imp) });
+  }
+  return out;
+}
+function bluLeggiCespiti(righe) {
+  const out = []; let cat = "", cur = null;
+  for (const v of righe.slice(1)) {
+    const c1 = String(v[1]).trim();
+    if (/^CATEGORIA:/i.test(c1)) { cat = c1.replace(/^CATEGORIA:\s*/i, ""); continue; }
+    if (String(v[3]).trim() && /CODICE CESPITE/i.test(String(v[4]))) { cur = { cat, desc: bluEnt(v[3]), codice: String(v[4]).replace(/.*CODICE CESPITE\s*:\s*/i, "").trim(), mov: [] }; out.push(cur); continue; }
+    if (cur && typeof v[5] === "number" && String(v[6]).trim()) cur.mov.push({ data: bluSerial(v[5]), causale: String(v[6]).trim(), costo: bluNum(v[7]), amm: bluNum(v[15]) });
+  }
+  return out;
+}
+
+/* ---------- ricostruzione delle registrazioni ---------- */
+function bluSottoinsieme(pool, val, obiettivo, conti, nRichiesti, max) {
+  const n = pool.length; let sol = null;
+  const giro = (i, scelti, somma) => {
+    if (sol) return;
+    if (scelti.length && Math.abs(somma - obiettivo) < 0.005 && new Set(scelti.map(conti)).size === nRichiesti) { sol = scelti.slice(); return; }
+    if (i >= n || scelti.length >= max) return;
+    scelti.push(pool[i]); giro(i + 1, scelti, somma + val(pool[i])); scelti.pop();
+    giro(i + 1, scelti, somma);
+  };
+  giro(0, [], 0);
+  return sol;
+}
+function bluRicostruisci() {
+  const X = BLU.X, C = BLU.C; if (!X || !C) return null;
+  const perData = new Map(); C.forEach((r, i) => { if (!perData.has(r.data)) perData.set(r.data, []); perData.get(r.data).push(i); });
+  const usate = new Set(), regs = [], nonRis = [], vuote = [];
+  for (const R of X) {
+    const blank = R.righe.filter(x => x.avere === null), acc = new Set(blank.map(x => bluNc(x.dconto)));
+    let righe;
+    if (acc.size <= 1) {
+      righe = []; let fatto = false;
+      for (const x of R.righe) {
+        if (x.avere === null) { if (!fatto) { righe.push({ cod: x.cod, dconto: x.dconto, dare: r2(R.tot), avere: 0 }); fatto = true; } }
+        else righe.push({ cod: x.cod, dconto: x.dconto, dare: 0, avere: r2(x.avere) });
+      }
+    } else {
+      const k = bluNd(R.desc);
+      const cand = (perData.get(R.data) || []).filter(i => !usate.has(i) && C[i].dare !== 0 && acc.has(bluNc(C[i].dconto)));
+      const pref = cand.filter(i => bluNd(C[i].desc) === k);
+      let sol = null;
+      for (const pool of [pref, cand]) {
+        if (!pool.length) continue;
+        if (Math.abs(pool.reduce((s, i) => s + C[i].dare, 0) - R.tot) < 0.005) { sol = pool; break; }
+        if (pool.length <= 16) { sol = bluSottoinsieme(pool, i => C[i].dare, R.tot, i => bluNc(C[i].dconto), acc.size, 8); if (sol) break; }
+      }
+      if (!sol) { nonRis.push(R); continue; }
+      sol.forEach(i => usate.add(i));
+      righe = R.righe.filter(x => x.avere !== null).map(x => ({ cod: x.cod, dconto: x.dconto, dare: 0, avere: r2(x.avere) }));
+      const per = new Map(); for (const i of sol) { const kk = bluNc(C[i].dconto); per.set(kk, r2((per.get(kk) || 0) + C[i].dare)); }
+      for (const x of blank) { const kk = bluNc(x.dconto); if (per.has(kk)) { righe.push({ cod: x.cod, dconto: x.dconto, dare: per.get(kk), avere: 0 }); per.delete(kk); } }
+    }
+    // importi negativi: si spostano nella colonna opposta
+    for (const x of righe) { if (x.dare < 0) { x.avere = r2(x.avere - x.dare); x.dare = 0; } if (x.avere < 0) { x.dare = r2(x.dare - x.avere); x.avere = 0; } }
+    righe = righe.filter(x => x.dare || x.avere);
+    if (!righe.length) { vuote.push(R); continue; }   // registrazioni a importo zero: non si riportano
+    regs.push({ ...R, righe });
+  }
+  const ultima = X.reduce((m, R) => R.data > m ? R.data : m, "");
+  return { regs, nonRis, vuote, ultima, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
+}
+/* tipo di cliente o fornitore dal CSV (tipo riga) e dai partitari */
+function bluCliTipo() {
+  const m = new Map();
+  for (const r of BLU.C || []) if (r.tipo === "CLIENTE" || r.tipo === "FORNITORE") m.set(r.cod, r.tipo === "CLIENTE" ? "C" : "F");
+  const up = new Set([...m.keys()].map(c => c.toUpperCase()));
+  for (const p of BLU.part) if (p.cod && !up.has(p.cod.toUpperCase())) m.set(p.cod, p.tipo);
+  return m;
+}
+
+/* ---------- conti e corrispondenze ---------- */
+function bluCalcola() {
+  BLU.ric = bluRicostruisci();
+  const tipi = bluCliTipo(), conti = new Map();
+  const add = (cod, d, mov, sp) => {
+    if (!cod || tipi.has(cod)) return;
+    const x = conti.get(cod) || { cod, d: d || "", mov: 0, sp: null, info: BLU.pdc?.[cod] || null };
+    if (!x.d && d) x.d = d; x.mov = r2(x.mov + (mov || 0)); if (sp != null) x.sp = sp; conti.set(cod, x);
+  };
+  for (const R of BLU.ric?.regs || []) for (const x of R.righe) add(x.cod, x.dconto, x.dare - x.avere);
+  for (const [c, b] of Object.entries(BLU.bil || {})) if (b.sez === "ATTIVO" || b.sez === "PASSIVO") add(c, b.d, 0, b.net); else add(c, b.d, 0);
+  const salv = (() => { try { return JSON.parse(localStorage.getItem(bluMapKey()) || "{}"); } catch { return {}; } })(), az = aziendaCorrente();
+  const indice = (() => { const n = indiceDescrizioni(); return n; })();
+  for (const x of conti.values()) {
+    if (BLU.mappa[x.cod] && contoOk(BLU.mappa[x.cod])) continue;
+    const da = [[salv[x.cod], "salvata"], [az?.mappaBlustring?.[x.cod], "salvata"], [BLU_S1[x.cod], "tabella"], [DESC_IDX.get(indice(x.d)), "descrizione"]].find(([c]) => c && contoOk(c));
+    if (da) { BLU.mappa[x.cod] = da[0]; BLU.fonteMappa[x.cod] = da[1]; }
+    else if (x.cod === BLU_CLI) { BLU.mappa[x.cod] = K.clienti; BLU.fonteMappa[x.cod] = "tabella"; }
+    else if (x.cod === BLU_FOR) { BLU.mappa[x.cod] = K.fornitori; BLU.fonteMappa[x.cod] = "tabella"; }
+  }
+  BLU.conti = [...conti.values()].sort((a, b) => String(a.info?.sez || "").localeCompare(String(b.info?.sez || "")) || a.cod.localeCompare(b.cod));
+  BLU.ape = bluApertura();
+}
+/* saldi al 1° gennaio = stato patrimoniale di Blustring alla data dei saldi meno i movimenti dell'anno fino a quella data */
+function bluApertura() {
+  if (!BLU.bil || !BLU.C || !BLU.ric) return null;
+  const al = BLU.ric.ultima, tipi = bluCliTipo(), movNc = new Map(); let movC = 0, movF = 0;
+  for (const r of BLU.C) {
+    if (!r.data || r.data > al) continue;
+    const v = r.dare - r.avere, t = tipi.get(r.cod);
+    if (t === "C") movC += v; else if (t === "F") movF += v; else { const k = bluNc(r.dconto); movNc.set(k, (movNc.get(k) || 0) + v); }
+  }
+  const saldi = [];
+  for (const [c, b] of Object.entries(BLU.bil)) {
+    if (b.sez !== "ATTIVO" && b.sez !== "PASSIVO") continue;
+    const mov = c === BLU_CLI ? movC : c === BLU_FOR ? movF : (movNc.get(bluNc(b.d)) || 0);
+    const ini = r2(b.net - mov);
+    if (Math.abs(ini) >= 0.005) saldi.push({ cod: c, d: b.d, ini, cli: c === BLU_CLI ? "C" : c === BLU_FOR ? "F" : "" });
+  }
+  const diff = r2(saldi.reduce((s, x) => s + x.ini, 0));
+  return { saldi, diff, al };
+}
+function bluControlloCE() {
+  if (!BLU.bil || !BLU.ric) return null;
+  const mov = new Map(); for (const R of BLU.ric.regs) for (const x of R.righe) mov.set(x.cod, r2((mov.get(x.cod) || 0) + x.dare - x.avere));
+  const ce = Object.entries(BLU.bil).filter(([, b]) => b.sez === "COSTI" || b.sez === "RICAVI");
+  if (!ce.length) return null;
+  const diff = ce.filter(([c, b]) => Math.abs((mov.get(c) || 0) - b.net) >= 0.01).map(([c, b]) => ({ c, d: b.d, blu: b.net, imp: mov.get(c) || 0 }));
+  const ric = ce.filter(([, b]) => b.sez === "RICAVI").reduce((s, [, b]) => s + b.val, 0), cos = ce.filter(([, b]) => b.sez === "COSTI").reduce((s, [, b]) => s + b.val, 0);
+  return { n: ce.length, diff, utile: r2(ric - cos) };
+}
+
+/* ---------- interfaccia ---------- */
+async function bluCarica(files) {
+  if (!aziendaCorrente()) return bluMsg("Crea o seleziona prima l'azienda", "err");
+  const letti = [];
+  for (const f of files) {
+    bluMsg(`Lettura di ${f.name}…`, "work");
+    try {
+      if (/\.(csv|txt)$/i.test(f.name)) {
+        const c = bluLeggiCsv(decodifica(new Uint8Array(await f.arrayBuffer())));
+        if (!c) { letti.push(`${f.name}: non è il libro giornale CSV di Blustring`); continue; }
+        BLU.C = c; BLU.file.csv = { nome: f.name, n: c.length }; letti.push(`${f.name}: libro giornale, ${c.length} righe`); continue;
+      }
+      const { nome, righe } = await bluFoglio(f), t = bluTipo(nome, righe);
+      if (t === "giornale") { BLU.X = bluLeggiGiornale(righe); BLU.file.giornale = { nome: f.name, n: BLU.X.length }; letti.push(`${f.name}: mastrino giornale, ${BLU.X.length} registrazioni`); }
+      else if (t === "pdc") { BLU.pdc = bluLeggiPdc(righe); BLU.file.pdc = { nome: f.name, n: Object.keys(BLU.pdc).length }; letti.push(`${f.name}: piano dei conti, ${BLU.file.pdc.n} conti`); }
+      else if (t === "bilancio") {
+        const b = bluLeggiBilancio(righe); BLU.bil = { ...(BLU.bil || {}), ...b };
+        const sp = Object.values(b).some(x => x.sez === "ATTIVO" || x.sez === "PASSIVO"), ce = Object.values(b).some(x => x.sez === "COSTI" || x.sez === "RICAVI");
+        BLU.file[sp ? "sp" : "ce"] = { nome: f.name, n: Object.keys(b).length }; if (sp && ce) BLU.file.ce = BLU.file.sp;
+        letti.push(`${f.name}: bilancio di verifica (${[sp ? "stato patrimoniale" : "", ce ? "conto economico" : ""].filter(Boolean).join(" e ")}), ${Object.keys(b).length} conti`);
+      }
+      else if (/^part/.test(t)) {
+        const tipo = t === "partF" ? "F" : "C", p = bluLeggiPartite(righe, tipo);
+        BLU.part = BLU.part.filter(x => x.tipo !== tipo).concat(p); BLU.file["part" + tipo] = { nome: f.name, n: p.length };
+        letti.push(`${f.name}: partitario ${tipo === "C" ? "clienti" : "fornitori"}, ${p.length} documenti`);
+      }
+      else if (t === "cespiti") { BLU.ces = bluLeggiCespiti(righe); BLU.file.ces = { nome: f.name, n: BLU.ces.length }; letti.push(`${f.name}: registro cespiti, ${BLU.ces.length} beni`); }
+      else letti.push(`${f.name}: file non riconosciuto`);
+    } catch (e) { letti.push(`${f.name}: ${e.message || "file non leggibile"}`); }
+  }
+  bluCalcola(); renderBlu();
+  bluMsg(letti.join(" · "), letti.some(x => /non |leggibile/.test(x)) ? "work" : "ok");
+}
+function bluErrori() {
+  const e = [], az = aziendaCorrente();
+  if (!az) e.push("Seleziona l'azienda");
+  if (!BLU.X) e.push("Manca il mastrino giornale (XLS)");
+  if (!BLU.C) e.push("Manca il libro giornale (CSV) con gli importi in dare");
+  if (az?.ripresa) e.push("Per questa azienda c'è già una ripresa saldi o un'importazione: annullala prima di importare di nuovo");
+  if (BLU.ric) {
+    const anni = new Set(BLU.ric.regs.map(R => Number(R.data.slice(0, 4))));
+    if (anni.size > 1) e.push("Il giornale contiene registrazioni di più esercizi");
+    else if (anni.size && !anni.has(S.anno)) e.push(`Le registrazioni sono del ${[...anni][0]}: seleziona quell'esercizio in alto`);
+    if (BLU.ric.nonRis.length) e.push(`${BLU.ric.nonRis.length} registrazioni non ricostruite`);
+  }
+  const da = BLU.conti.filter(x => !contoOk(BLU.mappa[x.cod])).length;
+  if (da) e.push(`${da} ${da === 1 ? "conto da collegare" : "conti da collegare"} al piano S1`);
+  if (BLU.ape && Math.abs(BLU.ape.diff) >= 0.01) e.push(`I saldi al 1° gennaio non quadrano (differenza ${num(BLU.ape.diff)})`);
+  return e;
+}
+function renderBlu() {
+  const box = $("#blu-card"); if (!box) return;
+  const f = BLU.file, voce = (k, nome, obbl) => `<div><span>${nome}${obbl ? " <span class=\"pill media\">necessario</span>" : ""}</span><span class="mono">${f[k] ? esc(f[k].nome) : "—"}</span></div>`;
+  $("#blu-file").innerHTML = voce("giornale", "Mastrino giornale (XLS)", true) + voce("csv", "Libro giornale (CSV)", true) + voce("pdc", "Piano dei conti") + voce("sp", "Bilancio di verifica · stato patrimoniale") + voce("ce", "Bilancio di verifica · conto economico") + voce("partC", "Partitario clienti") + voce("partF", "Partitario fornitori") + voce("ces", "Registro cespiti");
+  const vis = !!BLU.conti.length, det = $("#blu-conti-box"); det.hidden = !vis;
+  if (vis) {
+    const nDa = BLU.conti.filter(x => !contoOk(BLU.mappa[x.cod])).length;
+    $("#blu-conti-sum").textContent = `Corrispondenza con il piano dei conti S1 · ${BLU.conti.length} conti${nDa ? ` · ${nDa} da collegare` : " · tutti collegati"}`;
+    if (nDa && !det.dataset.toccato) det.open = true;
+    const al = BLU.ric?.ultima ? itDate(BLU.ric.ultima) : "";
+    $("#blu-th-sp").textContent = al ? `Saldo al ${al}` : "Saldo";
+    $("#blu-conti-body").innerHTML = BLU.conti.map(x => {
+      const c = BLU.mappa[x.cod] || "", ok = contoOk(c), fonte = BLU.fonteMappa[x.cod];
+      return `<tr data-blu="${esc(x.cod)}"><td><span class="mono">${esc(x.cod)}</span> ${esc(x.d)}${x.info ? `<div class="sub">${esc(x.info.sez)} · ${esc(x.info.l2 || x.info.l1)}</div>` : ""}</td>
+        <td><input class="cf mono" data-conto data-blu-conto value="${esc(c)}" placeholder="Cerca conto" aria-label="Conto del piano S1 per ${esc(x.d)}" style="width:130px"><div class="sub">${ok ? esc(descConto(c)) + (fonte === "agente" ? ` <span class="pill src">agente</span>` : fonte === "descrizione" ? ` <span class="pill src">stessa descrizione</span>` : "") : c ? `<span class="pill bassa">conto non valido</span>` : `<span class="pill media">da collegare</span>`}</div></td>
+        <td class="num">${x.mov ? num(x.mov) : ""}</td><td class="num">${x.sp != null ? num(x.sp) : ""}</td></tr>`;
+    }).join("");
+  }
+  const R = BLU.ric, ce = bluControlloCE(), ape = BLU.ape, tipi = bluCliTipo();
+  const nCli = new Set(), nFor = new Set();
+  for (const r of R?.regs || []) for (const x of r.righe) { const t = tipi.get(x.cod); if (t === "C") nCli.add(x.cod); else if (t === "F") nFor.add(x.cod); }
+  const righe = [];
+  if (R) righe.push(`<div><span>Registrazioni dal ${itDate(R.primaData)} al ${itDate(R.ultima)}</span><span class="mono">${R.regs.length}${R.nonRis.length ? ` · <span class="err">${R.nonRis.length} non ricostruite</span>` : " · tutte in quadratura"}${R.vuote.length ? ` · ${R.vuote.length} a importo zero escluse` : ""}</span></div>`);
+  if (R && (nCli.size || nFor.size)) righe.push(`<div><span>Clienti e fornitori movimentati</span><span class="mono">${nCli.size} clienti · ${nFor.size} fornitori</span></div>`);
+  if (ce) righe.push(`<div><span>Controllo del conto economico con il bilancio di Blustring (${ce.n} conti)</span><span class="mono">${ce.diff.length ? `<span class="err">${ce.diff.length} differenze</span>` : `<span class="ok">identico</span>`} · risultato ${eur(ce.utile)}</span></div>`);
+  if (ape) righe.push(`<div><span>Saldi patrimoniali al 1° gennaio ricavati dal bilancio al ${itDate(ape.al)}</span><span class="mono">${ape.saldi.length} conti · ${Math.abs(ape.diff) < 0.01 ? `<span class="ok">in quadratura</span>` : `<span class="err">differenza ${num(ape.diff)}</span>`}</span></div>`);
+  else if (R) righe.push(`<div><span>Saldi al 1° gennaio</span><span class="mono">carica il bilancio di verifica (stato patrimoniale) per riprenderli</span></div>`);
+  if (BLU.part.length) righe.push(`<div><span>Partite di clienti e fornitori con incassi e pagamenti da abbinare</span><span class="mono">${BLU.part.length} documenti</span></div>`);
+  if (BLU.ces) righe.push(`<div><span>Cespiti da riportare nel registro</span><span class="mono">${BLU.ces.length}</span></div>`);
+  const err = bluErrori();
+  if (R || BLU.X || BLU.C) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">Pronto per l'importazione</span><span></span></div>`);
+  $("#blu-riepilogo").innerHTML = righe.join("");
+  if (ce && ce.diff.length) $("#blu-riepilogo").insertAdjacentHTML("beforeend", `<div><span>Conti diversi: ${ce.diff.slice(0, 8).map(d => `${esc(d.c)} ${esc(d.d)} (Blustring ${num(d.blu)}, importato ${num(d.imp)})`).join("; ")}</span><span></span></div>`);
+  $("#blu-importa").disabled = !!err.length || bluInCorso;
+}
+async function bluAgente() {
+  const az = aziendaCorrente(); if (!az) return;
+  const target = BLU.conti.filter(x => !contoOk(BLU.mappa[x.cod]));
+  if (!target.length) return bluMsg("Tutti i conti sono già collegati al piano S1", "ok");
+  const cand = [...PDC.values()].filter(x => x.leaf && !x.eliminato && !/^89\./.test(x.c)).map(x => `${x.c} ${x.d}`).join("\n");
+  const items = target.slice(0, 80).map(x => ({ codice: x.cod, descrizione: x.d, sezione: x.info?.sez || "", gruppo: x.info?.l2 || x.info?.l1 || "", movimenti: x.mov, saldo: x.sp }));
+  bluMsg("L'agente sta proponendo le corrispondenze…", "work");
+  const o = await chiediJson("Importazione Blustring", `Sei il contabile di una ${az.forma || "società"} italiana che passa dal programma Blustring al piano dei conti S1. Per ogni conto di Blustring scegli il sottoconto S1 corrispondente, considerando sezione, gruppo e segno dei movimenti.
+Conti da collegare:\n${JSON.stringify(items)}\n\nPiano dei conti S1 (codice e descrizione):\n${cand}\n\nRispondi solo con un array JSON di oggetti {"codice":"codice Blustring","conto":"codice S1"}. Usa solo codici S1 dell'elenco.`);
+  let n = 0;
+  for (const x of (Array.isArray(o) ? o : [])) if (target.some(t => t.cod === String(x.codice)) && contoOk(String(x.conto))) { BLU.mappa[String(x.codice)] = String(x.conto); BLU.fonteMappa[String(x.codice)] = "agente"; n++; }
+  bluSalvaMappa(); renderBlu();
+  bluMsg(n ? `${n} ${n === 1 ? "conto proposto" : "conti proposti"} dall'agente: controllali prima di importare` : "L'agente non ha proposto conti", n ? "ok" : "err");
+}
+function bluSalvaMappa() { try { localStorage.setItem(bluMapKey(), JSON.stringify(BLU.mappa)); } catch {} }
+
+/* ---------- scrittura ---------- */
+let bluInCorso = false;
+async function bluScrivi(lista, avanza) {
+  if (!S.db) {
+    const d = lsLoad();
+    for (const coll of ["aziende", "anagrafiche", "registrazioni"]) {
+      const nuovi = lista.filter(([c]) => c === coll).map(([, o]) => o); if (!nuovi.length) continue;
+      const ids = new Set(nuovi.map(o => o.id)); d[coll] = d[coll].filter(x => !ids.has(x.id)).concat(nuovi);
+    }
+    lsSave(d); localRefresh(); return;
+  }
+  const coda = lista.slice(); let fatti = 0, errore = null;
+  const lavora = async () => {
+    while (coda.length && !errore) {
+      const [coll, o] = coda.shift(), { id, ...body } = o;
+      for (let t = 0; ; t++) {
+        try { await S.db.collection(coll).doc(id).set(body); break; }
+        catch (e) { if (t < 4 && /unavailable|resource|deadline|aborted/i.test(String(e?.code || e?.message || ""))) { await new Promise(r => setTimeout(r, 900 * (t + 1))); continue; } errore = e; break; }
+      }
+      fatti++; if (fatti % 20 === 0) avanza(fatti, lista.length);
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, lavora));
+  if (errore) throw errore;
+}
+function bluCausale(R, cli, desc) {
+  const D = desc.toUpperCase(), c = cli.find(x => x.tipo === "C"), f = cli.find(x => x.tipo === "F");
+  if (/^FATTURA/.test(D)) return c && c.dare > 0 ? "FE" : f && f.avere > 0 ? "FR" : c ? "FE" : f ? "FR" : "GEN";
+  if (/^NOTA (DI )?CREDITO/.test(D)) return c ? "NE" : f ? "NR" : "GEN";
+  if (/\bF24\b/.test(D)) return "F24";
+  if (/CORRISPETTIV/.test(D)) return "CO";
+  if (c && c.avere > 0 && !f) return "INC";
+  if (f && f.dare > 0 && !c) return "PAG";
+  return "GEN";
+}
+async function bluImporta() {
+  const err = bluErrori(); if (err.length) return bluMsg(err[0], "err");
+  bluInCorso = true; renderBlu();
+  const az = aziendaCorrente(), rid = uid(), adesso = new Date().toISOString(), tipi = bluCliTipo(), anno = S.anno;
+  const out = [], msg = t => { const el = $("#blu-imp-msg"); if (el) el.textContent = t; };
+  try {
+    /* 1. anagrafiche di clienti e fornitori */
+    const nomi = new Map();
+    for (const R of BLU.ric.regs) for (const x of R.righe) if (tipi.has(x.cod) && !nomi.has(x.cod)) nomi.set(x.cod, x.dconto);
+    { const up = new Set([...nomi.keys()].map(c => c.toUpperCase())); for (const p of BLU.part) if (p.cod && !up.has(p.cod.toUpperCase())) { nomi.set(p.cod, p.nome); up.add(p.cod.toUpperCase()); } }
+    const anag = new Map();
+    for (const [cod, nome] of nomi) {
+      const tipo = tipi.get(cod) || "C";
+      let a = S.anag.find(x => x.codBlustring === cod && x.tipo === tipo) || trovaAnag(tipo, { nome });
+      if (!a) { a = { id: uid(), aziendaId: S.aziendaId, tipo, denominazione: nome, piva: "", cf: "", conto: "", codBlustring: cod, creato: adesso, fonte: "blustring" }; out.push(["anagrafiche", a]); }
+      else if (!a.codBlustring) { a = { ...a, codBlustring: cod }; out.push(["anagrafiche", a]); }
+      anag.set(cod, a);
+    }
+    const contoDi = cod => tipi.has(cod) ? (tipi.get(cod) === "C" ? K.clienti : K.fornitori) : BLU.mappa[cod];
+    const base = { iva: [], fonte: "blustring", file: "Blustring", ripresaId: rid, aziendaId: S.aziendaId, anno, creato: adesso };
+    const nuovaReg = (o) => ({ ...base, abbinamenti: [], ...o, trim: trimDi(o.dataReg), mese: Number(o.dataReg.slice(5, 7)) });
+    /* 2. saldi al 1° gennaio */
+    const regsApe = [];
+    if (BLU.ape && BLU.ape.saldi.length) {
+      const per = new Map(); let C = 0, F = 0;
+      for (const s of BLU.ape.saldi) { if (s.cli === "C") { C += s.ini; continue; } if (s.cli === "F") { F -= s.ini; continue; } const c = BLU.mappa[s.cod]; per.set(c, r2((per.get(c) || 0) + s.ini)); }
+      C = r2(C); F = r2(F);
+      const righe = [];
+      for (const [c, v] of [...per].sort((a, b) => cmpCodici(a[0], b[0]))) if (Math.abs(v) >= 0.005) righe.push(riga(c, v > 0 ? v : 0, v < 0 ? -v : 0));
+      if (C) righe.push(riga(RIP_CONTI.partC, C > 0 ? C : 0, C < 0 ? -C : 0));
+      if (F) righe.push(riga(RIP_CONTI.partF, F < 0 ? -F : 0, F > 0 ? F : 0));
+      const tt = totali({ righe }); righe.push(riga(RIP_CONTI.spIniz, tt.a, 0), riga(RIP_CONTI.spIniz, 0, tt.d));
+      const dataApe = `${anno}-01-01`;
+      regsApe.push(nuovaReg({ id: uid(), causale: "AP", dataReg: dataApe, descr: "Riapertura dei conti da Blustring", righe, chiave: `BLU|${rid}|AP`, note: `Saldi al 1° gennaio ricavati dal bilancio di verifica di Blustring al ${itDate(BLU.ape.al)} meno i movimenti dell'anno` }));
+      for (const [k, tot] of [["C", C], ["F", F]]) {
+        if (Math.abs(tot) < 0.01) continue;
+        const nome = k === "C" ? "Clienti diversi (saldi al 1° gennaio da Blustring)" : "Fornitori diversi (saldi al 1° gennaio da Blustring)";
+        let a = S.anag.find(x => x.tipo === k && x.denominazione === nome);
+        if (!a) { a = { id: uid(), aziendaId: S.aziendaId, tipo: k, denominazione: nome, piva: "", cf: "", conto: "", creato: adesso, fonte: "blustring" }; out.push(["anagrafiche", a]); }
+        const abs = Math.abs(tot), pos = tot > 0, cAn = k === "C" ? K.clienti : K.fornitori, cRip = k === "C" ? RIP_CONTI.partC : RIP_CONTI.partF;
+        const anR = riga(cAn, (k === "C") === pos ? abs : 0, (k === "C") === pos ? 0 : abs, { anagId: a.id }), ripR = riga(cRip, anR.avere, anR.dare);
+        regsApe.push(nuovaReg({ id: uid(), causale: "AP", dataReg: dataApe, descr: "Partite aperte al 1° gennaio (da Blustring, non dettagliate)", anagId: a.id, anagNome: a.denominazione, righe: k === "C" ? [anR, ripR] : [ripR, anR], partita: { tipo: k, totale: tot, ritenuta: 0, scadenza: "" }, chiave: `BLU|${rid}|AP${k}`, generica: true }));
+      }
+    }
+    /* 3. registrazioni dell'anno */
+    const regs = [];
+    for (const R of BLU.ric.regs) {
+      const righe = R.righe.map(x => riga(contoDi(x.cod), x.dare, x.avere, tipi.has(x.cod) ? { anagId: anag.get(x.cod)?.id } : undefined));
+      const cli = R.righe.filter(x => tipi.has(x.cod)).map(x => ({ cod: x.cod, tipo: tipi.get(x.cod), dare: x.dare, avere: x.avere }));
+      const causale = bluCausale(R, cli, R.desc), m = R.desc.match(/\bN\.?\s+(.+?)\s+DEL\s+(\d{2}\/\d{2}\/\d{4})/i);
+      const codici = [...new Set(cli.map(x => x.cod))], an = codici.length === 1 ? anag.get(codici[0]) : null;
+      const reg = nuovaReg({ id: uid(), causale, dataReg: R.data, dataDoc: m ? bluSerial(m[2]) : R.data, numDoc: m ? m[1] : "", descr: R.desc, righe, chiave: `BLU|${rid}|${R.n}`, numBlustring: R.n });
+      if (an) { reg.anagId = an.id; reg.anagNome = an.denominazione; }
+      if (an && ["FE", "FR", "NE", "NR"].includes(causale)) {
+        const t = tipi.get(codici[0]), tot = r2(cli.reduce((s, x) => s + (t === "C" ? x.dare - x.avere : x.avere - x.dare), 0));
+        reg.partita = { tipo: t, totale: tot, ritenuta: 0, scadenza: "" };
+      }
+      regs.push(reg);
+    }
+    /* 4. abbinamenti di incassi e pagamenti dai partitari */
+    let nAbb = 0; const nonAbb = [];
+    if (BLU.part.length) {
+      const fatture = new Map();   // codice|numero|data → registrazione
+      const perN = new Map(BLU.ric.regs.map(R => [R.n, R]));
+      for (const r of regs) if (r.partita) { const cod = perN.get(r.numBlustring)?.righe.find(x => tipi.has(x.cod))?.cod; if (cod) fatture.set(`${cod.toUpperCase()}|${bluNc(r.numDoc)}|${r.dataDoc}`, r); }
+      const codVero = new Map([...anag.keys()].map(c => [c.toUpperCase(), c]));
+      const perData = new Map(); for (const r of regs) { if (!perData.has(r.dataReg)) perData.set(r.dataReg, []); perData.get(r.dataReg).push(r); }
+      const capienza = new Map();  // riga di incasso/pagamento → importo ancora da abbinare
+      const chiaveRiga = (r, i) => `${r.id}|${i}`;
+      const generica = { C: regsApe.find(r => r.generica && r.partita?.tipo === "C"), F: regsApe.find(r => r.generica && r.partita?.tipo === "F") };
+      const abbina = (pagReg, doc, imp) => { pagReg.abbinamenti.push({ regId: doc.id, importo: r2(imp) }); nAbb++; };
+      const trovaPag = (p, cod, tipo) => {
+        const an = anag.get(cod); if (!an) return null;
+        // prima la riga con lo stesso importo, poi una riga con importo sufficiente
+        for (const esatto of [true, false]) for (const r of perData.get(p.data) || []) {
+          if (r.partita) continue;
+          for (let i = 0; i < r.righe.length; i++) {
+            const x = r.righe[i]; if (x.anagId !== an.id) continue;
+            const neg = p.imp < 0, imp = Math.abs(p.imp);
+            const lato = (tipo === "C") !== neg ? x.avere : x.dare; if (!(lato > 0)) continue;
+            const k = chiaveRiga(r, i) + (neg ? "d" : ""), cap = capienza.has(k) ? capienza.get(k) : lato;
+            if (esatto ? Math.abs(cap - imp) < 0.005 : cap + 0.005 >= imp) { capienza.set(k, r2(cap - imp)); return r; }
+          }
+        }
+        return null;
+      };
+      for (const d of BLU.part) {
+        const cod = codVero.get(String(d.cod).toUpperCase()) || d.cod;
+        const doc = fatture.get(`${String(cod).toUpperCase()}|${bluNc(d.numero)}|${d.data}`); if (!doc) continue;
+        for (const p of d.pag) { const r = trovaPag(p, cod, d.tipo); if (r) abbina(r, doc, p.imp); else nonAbb.push({ ...p, cod, numero: d.numero }); }
+      }
+      // righe di clienti e fornitori rimaste libere: quelle dal lato del documento diventano partite,
+      // quelle dal lato dell'incasso o pagamento si abbinano alle partite al 1° gennaio
+      for (const r of regs) {
+        if (r.partita) continue;
+        const lati = { doc: 0, pag: 0 }; let t = "";
+        r.righe.forEach((x, i) => {
+          if (!x.anagId) return;
+          const tt = S.anag.find(a => a.id === x.anagId)?.tipo || [...anag.values()].find(a => a.id === x.anagId)?.tipo; if (!tt) return; t = tt;
+          const doc = tt === "C" ? x.dare : x.avere, pag = tt === "C" ? x.avere : x.dare, k = chiaveRiga(r, i);
+          if (doc > 0) { const capD = capienza.has(k + "d") ? capienza.get(k + "d") : doc; lati.doc += capD; }
+          if (pag > 0) { const cap = capienza.has(k) ? capienza.get(k) : pag; lati.pag += cap; capienza.set(k, 0); }
+        });
+        if (!t) continue;
+        if (r.anagId && lati.doc > 0.005 && lati.pag < 0.005) { r.partita = { tipo: t, totale: r2(lati.doc), ritenuta: 0, scadenza: "" }; continue; }
+        if (lati.pag >= 0.01 && generica[t]) abbina(r, generica[t], r2(lati.pag - (r.anagId ? 0 : 0)));
+        if (lati.doc >= 0.01 && generica[t]) abbina(r, generica[t], -r2(lati.doc));
+      }
+    }
+    /* 5. cespiti */
+    let nCes = 0; const cesNuovi = [];
+    if (BLU.ces) {
+      const contoCat = cat => { const c = cat.toUpperCase(); return /AUTOVETT|MOTOVEIC/.test(c) ? "05.07.15" : /AUTOVEIC|AUTOCARR|TRASPORTO/.test(c) ? "05.07.09" : /ELETTRON|COMPUTER|ELABORAT/.test(c) ? "05.07.05" : /TELEF/.test(c) ? "05.07.07" : /MOBILI|ARRED/.test(c) ? "05.07.01" : /ATTREZZ/.test(c) ? "05.05.51" : /MACCHINAR|MACCHINE OPERAT/.test(c) ? "05.03.11" : /IMPIANT/.test(c) ? "05.03.09" : /COSTITUZ|AMPLIAMENTO|SOCIETAR/.test(c) ? "03.01.01" : /SOFTWARE/.test(c) ? "03.03.01" : /FABBRIC/.test(c) ? "05.01.05" : "05.07.51"; };
+      const inizio = `${anno}-01-01`;
+      for (const b of BLU.ces) {
+        const acq = b.mov.filter(m => /acquist|incrementat/i.test(m.causale)), amm = b.mov.filter(m => /ammortament/i.test(m.causale));
+        const costo = r2(acq.reduce((s, m) => s + m.costo, 0)); if (!(costo > 0)) continue;
+        const data = acq.map(m => m.data).sort()[0] || inizio;
+        const fondoIni = r2(amm.filter(m => m.data < inizio).reduce((s, m) => s + m.amm, 0));
+        const ordinari = amm.filter(m => /ordinari/i.test(m.causale)).map(m => m.amm), qMax = ordinari.length ? Math.max(...ordinari) : 0;
+        let conto = foglia(contoCat(b.cat)); if (!contoOk(conto)) conto = foglia("05.07.51");
+        const [fo, am, kDef] = propostaCespite(conto);
+        const coeff = qMax > 0 ? Math.min(100, Math.round(qMax / costo * 10000) / 100) : kDef;
+        const ceduto = b.mov.find(m => /vendit|cession|eliminaz|dismission/i.test(m.causale));
+        cesNuovi.push({ id: uid(), desc: `${b.desc}${b.codice ? ` (${b.codice})` : ""}`.slice(0, 100), conto, fondo: foglia(fo), amm: foglia(am), data, costo, coeff, fondoIni, fondoAnno: anno - 1, meta: false, creato: adesso, fonte: "blustring", ripresaId: rid, categoriaBlustring: b.cat, ...(ceduto ? { dismesso: { data: ceduto.data } } : {}) });
+        nCes++;
+      }
+    }
+    /* 6. scrittura */
+    const tutte = regsApe.concat(regs);
+    for (const r of tutte) { const e = erroriReg(r).filter(x => !/Cliente o fornitore da indicare/.test(x)); if (e.length) throw new Error(`${r.descr}: ${e[0]}`); }
+    for (const r of tutte) out.push(["registrazioni", r]);
+    msg(`Salvataggio di ${out.length} documenti…`);
+    await bluScrivi(out, (i, n) => msg(`Salvataggio… ${i} di ${n}`));
+    const azNuova = { ...aziendaCorrente(), mappaBlustring: { ...(az.mappaBlustring || {}), ...BLU.mappa }, cespiti: (aziendaCorrente().cespiti || []).concat(cesNuovi),
+      ripresa: { id: rid, tipo: "corso", data: BLU.ric.ultima, credIva: 0, file: "Blustring", nReg: tutte.length, anno, creato: adesso, blustring: true } };
+    await store.put("aziende", azNuova);
+    bluSalvaMappa();
+    log("Importazione Blustring", `${regs.length} registrazioni, ${anag.size} clienti e fornitori, ${nAbb} abbinamenti${nCes ? `, ${nCes} cespiti` : ""}`, "ok");
+    const fine = BLU.ric.ultima; BLU = bluVuoto(); renderBlu();
+    msg("");
+    bluMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(fine)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${nonAbb.length ? ` (${nonAbb.length} del partitario da abbinare a mano)` : ""}${nCes ? `, ${nCes} cespiti nel registro` : ""}. Le liquidazioni IVA fino al ${itDate(fine)} restano quelle di Blustring.`, "ok");
+  } catch (e) {
+    msg(""); bluMsg(`Importazione non riuscita: ${e.message || e}`, "err");
+  } finally { bluInCorso = false; renderBlu(); }
+}
+
+async function bluElimina(ids) {
+  if (!S.db) { const d = lsLoad(); d.registrazioni = d.registrazioni.filter(r => !ids.has(r.id)); lsSave(d); localRefresh(); return; }
+  const coda = [...ids];
+  const lavora = async () => { while (coda.length) { const id = coda.shift(); for (let t = 0; ; t++) { try { await S.db.collection("registrazioni").doc(id).delete(); break; } catch (e) { if (t < 4) { await new Promise(r => setTimeout(r, 900 * (t + 1))); continue; } throw e; } } } };
+  await Promise.all(Array.from({ length: 6 }, lavora));
+}
+/* ---------- eventi ---------- */
+(() => {
+  const d = $("#drop-blu"), inp = $("#in-blu"); if (!d) return;
+  d.addEventListener("click", () => inp.click());
+  d.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inp.click(); } });
+  ["dragenter", "dragover"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.remove("over"); }));
+  d.addEventListener("drop", e => { const f = [...(e.dataTransfer?.files || [])]; if (f.length) bluCarica(f); });
+  inp.addEventListener("change", () => { const f = [...inp.files]; inp.value = ""; if (f.length) bluCarica(f); });
+  $("#blu-svuota").addEventListener("click", () => { BLU = bluVuoto(); renderBlu(); bluMsg(""); });
+  $("#blu-conti-box").addEventListener("toggle", e => { e.currentTarget.dataset.toccato = "1"; });
+  $("#blu-agente").addEventListener("click", () => bluAgente().catch(e => bluMsg(`Agente non disponibile: ${e.message || e}`, "err")));
+  $("#blu-importa").addEventListener("click", bluImporta);
+  $("#blu-conti-body").addEventListener("conto", e => { const tr = e.target.closest("tr[data-blu]"); if (!tr) return; BLU.mappa[tr.dataset.blu] = e.detail; BLU.fonteMappa[tr.dataset.blu] = "manuale"; bluSalvaMappa(); renderBlu(); });
+  $("#blu-conti-body").addEventListener("change", e => { const tr = e.target.closest("tr[data-blu]"); if (!tr || !e.target.matches("[data-blu-conto]")) return; BLU.mappa[tr.dataset.blu] = e.target.value.trim(); BLU.fonteMappa[tr.dataset.blu] = "manuale"; bluSalvaMappa(); renderBlu(); });
+})();
 
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
