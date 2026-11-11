@@ -1720,6 +1720,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 /* stampa e PDF: per i moduli si usa la funzione del modulo (sezione aperta), per le pagine del portale quella del portale */
 window.STAMPA_CFG = {
   nessunPulsante: true, app: () => 'Sandalia Gestionale', anno: () => '', soggetto: () => '',
+  salta: '.mods, .strip, #storeNote, .head p:not(.eyebrow), .tools, .seg, .sch-top button, .eyebrow', liste: '#dues, .sched, .todo',
   pannello: () => { const pg = [...document.querySelectorAll('#stage > section.page')].find(x => !x.hidden); if (!pg) return document.querySelector('#stage'); return [...pg.querySelectorAll(':scope > .wrap')].find(w => !w.hidden) || pg; },
   sezione: () => { const pg = window.STAMPA_CFG.pannello(); return (pg.querySelector('h1')?.textContent || '').trim(); }
 };
@@ -1819,16 +1820,23 @@ $('#pdfBtn').addEventListener('click', () => stampaPortale('pdf'));
     const out = []; let campi = [];
     const flush = () => { if (campi.length) { out.push({ t: "kv", righe: campi }); campi = []; } };
     const emetti = b => { flush(); out.push(b); };
-    const salta = el => el.matches("script,style,template,dialog,button,svg,canvas,img,datalist,input,select,textarea,.drop,.no-print,.hint,.note,.acts,.bulk-bar,.ed-row,.loading,.stampa-btns,.stampa-int");
+    const SALTA = "script,style,template,dialog,button,svg,canvas,img,datalist,input,select,textarea,.drop,.no-print,.hint,.note,.acts,.bulk-bar,.ed-row,.loading,.stampa-btns,.stampa-int" + (C().salta ? "," + C().salta : "");
+    const salta = el => el.matches(SALTA), titolo = pulisci(info().sez);
     const visita = el => {
       if (el.nodeType !== 1 || salta(el) || !vis(el)) return;
       if (el.tagName === "DETAILS" && !el.open) return;
       if (el.tagName === "SUMMARY") { const t = testo(el); if (t) emetti({ t: "h", s: t, l: 4 }); return; }
       if (el.tagName === "TABLE") { const t = tabella(el); if (t) emetti(t); return; }
-      if (/^H[1-4]$/.test(el.tagName)) { const t = testo(el); if (t) emetti({ t: "h", s: t, l: +el.tagName[1] }); return; }
+      if (/^H[1-4]$/.test(el.tagName)) { const t = testo(el); if (t && !(el.tagName === "H1" && t === titolo)) emetti({ t: "h", s: t, l: +el.tagName[1] }); return; }
+      // elenchi di voci (scadenze, promemoria): una riga per voce, una colonna per parte
+      if (C().liste && el.matches(C().liste)) {
+        const righe = [...el.children].filter(r => vis(r) && !r.matches("p,.note,.hint")).map(r => (r.children.length ? [...r.children].filter(vis).map(testo) : [testo(r)]).map(x => x.replace(/\n/g, " · "))).filter(r => r.some(Boolean));
+        if (righe.length) { const n = Math.max(...righe.map(r => r.length)); emetti({ t: "tab", H: [], B: righe.map(r => r.concat(Array(n - r.length).fill("")).map(x => ({ s: x, num: false, span: 1 }))), F: [], n, numCol: new Set() }); }
+        return;
+      }
       if (el.matches(".kpis")) {
         const r = [...el.children].filter(vis).map(k => [testo(k.querySelector(".l")), testo(k.querySelector(".v")), testo(k.querySelector(".s"))]).filter(r => r[0] || r[1]);
-        if (r.length) emetti({ t: "kv", righe: r }); return;
+        if (r.length) emetti({ t: "kpi", righe: r }); return;
       }
       if (el.matches(".lm")) {
         const r = [...el.children].filter(vis).map(d => { const sp = [...d.children].filter(vis); return sp.length >= 2 ? [testo(sp[0]), sp.slice(1).map(testo).filter(Boolean).join(" ")] : [testo(d), ""]; }).filter(r => r[0] || r[1]);
@@ -1839,9 +1847,10 @@ $('#pdfBtn').addEventListener('click', () => stampaPortale('pdf'));
         if (!ctrl) { for (const c of el.children) visita(c); return; }
         const lab = el.cloneNode(true); lab.querySelectorAll("input,select,textarea,button,.sub,datalist,svg").forEach(x => x.remove());
         const l = pulisci(lab.textContent), v = pulisci(valoreCampo(ctrl)), sub = pulisci(el.querySelector(".sub")?.textContent || "");
-        if (l) campi.push([l, [v || "–", sub].filter(Boolean).join(" · ")]);
+        if (l && v.replace(/^[—–-]$/, "")) campi.push([l, [v, sub].filter(Boolean).join(" · ")]);
         return;
       }
+      if (el.matches(".notice, .banner")) { const t = testo(el); if (t) emetti({ t: "nota", s: t }); return; }
       if (el.matches(".notice, .banner, .msg, .lead, p, .anom, .err-box")) { const t = testo(el); if (t) emetti({ t: "p", s: t }); return; }
       const figli = [...el.children];
       if (!figli.length) { const t = testo(el); if (t && t.length > 1) emetti({ t: "p", s: t }); return; }
@@ -1849,6 +1858,21 @@ $('#pdfBtn').addEventListener('click', () => stampaPortale('pdf'));
     };
     visita(root); flush();
     return out;
+  }
+
+  /* ---------- identità grafica ---------- */
+  const NAVY = [14, 33, 49], BRASS = [168, 118, 31], MUTED = [88, 103, 119], LINEA = [221, 228, 235], ZEBRA = [245, 248, 251], CARTA = [247, 249, 251];
+  function accento() {
+    const m = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim().match(/^#([0-9a-f]{6})$/i);
+    if (m) { const c = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)); if (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] < 150) return c; }
+    return [28, 101, 151];
+  }
+  function studio() {
+    if (C().studio) { const s = C().studio(); if (s) return s; }
+    for (const w of [window, (() => { try { return window.parent; } catch (e) { return null; } })()]) {
+      try { const o = JSON.parse(w.localStorage.getItem("portale-studio-v1") || "null"); if (o && o.intDenominazione) return String(o.intDenominazione); } catch (e) {}
+    }
+    return "";
   }
 
   /* ---------- PDF ---------- */
@@ -1860,41 +1884,88 @@ $('#pdfBtn').addEventListener('click', () => stampaPortale('pdf'));
       if (!B.length) { avviso("Questa sezione non contiene dati da stampare.", true); return; }
       const larga = B.some(b => b.t === "tab" && b.n > 7);
       const doc = new jsPDF({ orientation: larga ? "landscape" : "portrait", unit: "mm", format: "a4", compress: true });
-      const W = doc.internal.pageSize.getWidth(), Hh = doc.internal.pageSize.getHeight(), M = 12, TOP = 24, BOT = 14;
+      const W = doc.internal.pageSize.getWidth(), Hh = doc.internal.pageSize.getHeight(), M = 14, TOP = 23, BOT = 17, ACC = accento(), ST = winAnsi(studio()), L = W - 2 * M;
       let y = TOP;
       const spazio = h => { if (y + h > Hh - BOT) { doc.addPage(); y = TOP; } };
-      const titolo = [I.sez, I.sog, I.anno ? `esercizio ${I.anno}` : ""].filter(Boolean).join(" · ");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(20);
-      const tl = doc.splitTextToSize(winAnsi(titolo || I.app), W - 2 * M); spazio(tl.length * 6); doc.text(tl, M, y + 4); y += tl.length * 6.2 + 3;
-      const base = { margin: { left: M, right: M, top: TOP, bottom: BOT }, styles: { font: "helvetica", fontSize: 8.4, cellPadding: 1.6, overflow: "linebreak", textColor: 25, lineColor: 205, lineWidth: 0.1 }, headStyles: { fillColor: [232, 238, 243], textColor: 25, fontStyle: "bold" }, footStyles: { fillColor: [245, 247, 249], textColor: 25, fontStyle: "bold" }, theme: "grid" };
+      const font = (stile, dim, col) => { doc.setFont("helvetica", stile); doc.setFontSize(dim); doc.setTextColor(...(Array.isArray(col) ? col : [col, col, col])); };
+      const adatta = (s, w, dim, min) => { let d = dim; doc.setFontSize(d); while (d > min && doc.getTextWidth(s) > w) { d -= 0.5; doc.setFontSize(d); } return d; };
+
+      /* copertina della prima pagina: fascia con il marchio, titolo e soggetto */
+      doc.setFillColor(...NAVY); doc.rect(0, 0, W, 31, "F");
+      doc.setFillColor(...BRASS); doc.rect(0, 31, W, 1.1, "F");
+      doc.setFillColor(...ACC); doc.roundedRect(M, 8.5, 14, 14, 3, 3, "F");
+      font("bold", 15, 255); doc.text("S", M + 7, 18.6, { align: "center" });
+      font("bold", 13, 255); doc.text(ST || "Sandalia", M + 19, 14.8);
+      font("normal", 8.5, [176, 194, 209]); doc.text(winAnsi(I.app), M + 19, 20.2);
+      if (I.anno) { font("bold", 9.5, 255); doc.text(`ESERCIZIO ${I.anno}`, W - M, 14.8, { align: "right" }); }
+      font("normal", 8.5, [176, 194, 209]); doc.text(`Stampato il ${oggi()}`, W - M, 20.2, { align: "right" });
+      y = 45;
+      font("bold", 21, NAVY); const tit = winAnsi(I.sez || I.app); adatta(tit, L, 21, 13); doc.text(tit, M, y); y += 6.5;
+      if (I.sog) { font("normal", 11.5, MUTED); const sg = winAnsi(I.sog); adatta(sg, L, 11.5, 8); doc.text(sg, M, y); y += 5; }
+      doc.setFillColor(...ACC); doc.rect(M, y, 22, 0.9, "F"); y += 8;
+
+      const base = { margin: { left: M, right: M, top: TOP, bottom: BOT },
+        styles: { font: "helvetica", fontSize: 8.3, cellPadding: { top: 1.9, bottom: 1.9, left: 2.2, right: 2.2 }, overflow: "linebreak", textColor: [22, 33, 43], lineColor: LINEA, lineWidth: { bottom: 0.15 }, valign: "top" },
+        headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", fontSize: 7.7, lineWidth: 0, cellPadding: { top: 2.3, bottom: 2.3, left: 2.2, right: 2.2 } },
+        alternateRowStyles: { fillColor: ZEBRA },
+        footStyles: { fillColor: [229, 236, 242], textColor: NAVY, fontStyle: "bold", lineColor: ACC, lineWidth: { top: 0.5 } }, theme: "plain" };
       for (const b of B) {
         if (b.t === "h") {
-          spazio(b.l <= 2 ? 12 : 9);
-          doc.setFont("helvetica", "bold"); doc.setFontSize(b.l <= 2 ? 12 : 10); doc.setTextColor(20);
-          const l = doc.splitTextToSize(b.s, W - 2 * M); y += b.l <= 2 ? 3 : 1.5; doc.text(l, M, y + 3.5); y += l.length * (b.l <= 2 ? 5.4 : 4.6) + 1.5;
+          const grande = b.l <= 2;
+          spazio(grande ? 16 : 11); y += grande ? 3 : 1.5;
+          if (grande) { doc.setFillColor(...ACC); doc.rect(M, y - 0.4, 1.3, 5, "F"); font("bold", 12.5, NAVY); const l = doc.splitTextToSize(b.s, L - 4); doc.text(l, M + 3.6, y + 3.6); y += l.length * 5.4 + 2.6; }
+          else { font("bold", 9.8, ACC); const l = doc.splitTextToSize(b.s, L); doc.text(l, M, y + 3.2); y += l.length * 4.5 + 1.6; }
         } else if (b.t === "p") {
-          doc.setFont("helvetica", "normal"); doc.setFontSize(8.6); doc.setTextColor(60);
-          for (const l of doc.splitTextToSize(b.s, W - 2 * M)) { spazio(4.2); doc.text(l, M, y + 3); y += 4.1; }
-          y += 1.5;
+          font("normal", 8.6, MUTED);
+          for (const l of doc.splitTextToSize(b.s, L)) { spazio(4.2); doc.text(l, M, y + 3); y += 4.1; }
+          y += 1.8;
+        } else if (b.t === "nota") {
+          font("normal", 8.6, [92, 62, 8]);
+          const l = doc.splitTextToSize(b.s, L - 9), h = l.length * 4.1 + 4.4; spazio(h + 2);
+          doc.setFillColor(251, 243, 223); doc.roundedRect(M, y, L, h, 1.2, 1.2, "F"); doc.setFillColor(...BRASS); doc.rect(M, y, 1.2, h, "F");
+          doc.text(l, M + 4.5, y + 5.2); y += h + 4;
+        } else if (b.t === "kpi") {
+          const per = Math.min(b.righe.length, larga ? 5 : 4), gap = 3.5, cw = (L - gap * (per - 1)) / per, ch = 22;
+          for (let i = 0; i < b.righe.length; i += per) {
+            spazio(ch + 4);
+            b.righe.slice(i, i + per).forEach(([l, v, s], k) => {
+              const x = M + k * (cw + gap);
+              doc.setFillColor(...CARTA); doc.setDrawColor(...LINEA); doc.setLineWidth(0.2); doc.roundedRect(x, y, cw, ch, 1.6, 1.6, "FD");
+              doc.setFillColor(...ACC); doc.rect(x, y + 3, 1.2, ch - 6, "F");
+              font("bold", 6.6, MUTED); doc.text(doc.splitTextToSize(l.toUpperCase(), cw - 7).slice(0, 2), x + 4, y + 5.2);
+              font("bold", 13, NAVY); adatta(v, cw - 7, 13, 8); doc.text(v, x + 4, y + 13.6);
+              font("normal", 6.8, MUTED); doc.text(doc.splitTextToSize(s || "", cw - 7).slice(0, 2), x + 4, y + 17.4);
+            });
+            y += ch + 3.5;
+          }
+          y += 2.5;
         } else if (b.t === "kv") {
-          doc.autoTable({ ...base, startY: y, theme: "plain", body: b.righe, styles: { ...base.styles, cellPadding: { top: 1.2, bottom: 1.2, left: 1.5, right: 1.5 } },
-            columnStyles: { 0: { cellWidth: Math.min(70, (W - 2 * M) * 0.42), textColor: 80 }, 1: { fontStyle: "bold" }, 2: { textColor: 100, fontSize: 7.8 } },
-            didDrawCell: d => { if (d.section === "body" && d.column.index === 0) { doc.setDrawColor(225); doc.line(M, d.cell.y + d.cell.height, W - M, d.cell.y + d.cell.height); } } });
-          y = doc.lastAutoTable.finalY + 4;
+          doc.autoTable({ ...base, startY: y, body: b.righe, alternateRowStyles: {}, styles: { ...base.styles, cellPadding: { top: 1.6, bottom: 1.6, left: 1.2, right: 1.2 } },
+            columnStyles: { 0: { cellWidth: Math.min(78, L * 0.44), textColor: MUTED }, 1: { fontStyle: "bold", textColor: NAVY }, 2: { textColor: MUTED, fontSize: 7.6 } } });
+          y = doc.lastAutoTable.finalY + 5;
         } else if (b.t === "tab") {
           const conv = (r, sez) => { let p = 0; return r.map(c => { const o = { content: c.s, colSpan: c.span, styles: {} }; if ((sez !== "head" && (c.num || (c.span === 1 && b.numCol.has(p)))) || (sez === "head" && c.span === 1 && b.numCol.has(p))) o.styles.halign = "right"; p += c.span; return o; }); };
-          doc.autoTable({ ...base, startY: y, head: b.H.map(r => conv(r, "head")), body: b.B.map(r => conv(r, "body")), foot: b.F.map(r => conv(r, "foot")), showHead: "everyPage", showFoot: "lastPage", rowPageBreak: "avoid" });
-          y = doc.lastAutoTable.finalY + 5;
+          const colNum = {}; for (const i of b.numCol) colNum[i] = { cellWidth: "wrap" };   // importi su una sola riga
+          doc.autoTable({ ...base, startY: y, head: b.H.map(r => conv(r, "head")), body: b.B.map(r => conv(r, "body")), foot: b.F.map(r => conv(r, "foot")), columnStyles: colNum, showHead: "everyPage", showFoot: "lastPage", rowPageBreak: "avoid" });
+          y = doc.lastAutoTable.finalY + 6;
         }
       }
-      const n = doc.internal.getNumberOfPages(), testa = winAnsi([I.app, I.sog, I.anno].filter(Boolean).join(" · ")), sez = winAnsi(I.sez);
+      /* testatina dalle pagine successive e piè di pagina su tutte */
+      const n = doc.internal.getNumberOfPages(), testa = winAnsi([I.sez, I.sog, I.anno].filter(Boolean).join("  ·  ")), pie = winAnsi([ST || "Sandalia", I.app].filter(Boolean).join("  ·  "));
       for (let i = 1; i <= n; i++) {
-        doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(7.6); doc.setTextColor(110);
-        doc.text(doc.splitTextToSize(testa, W - 2 * M - 40)[0] || "", M, 10); doc.text(sez, W - M, 10, { align: "right" });
-        doc.setDrawColor(200); doc.line(M, 12.5, W - M, 12.5);
-        doc.text(`Stampato il ${oggi()}`, M, Hh - 7); doc.text(`Pagina ${i} di ${n}`, W - M, Hh - 7, { align: "right" });
+        doc.setPage(i);
+        if (i > 1) {
+          doc.setFillColor(...ACC); doc.roundedRect(M, 8.2, 6, 6, 1.3, 1.3, "F"); font("bold", 7.5, 255); doc.text("S", M + 3, 12.6, { align: "center" });
+          font("bold", 8.6, NAVY); doc.text(doc.splitTextToSize(testa, L - 12)[0] || "", M + 8.5, 12.4);
+          doc.setDrawColor(...ACC); doc.setLineWidth(0.5); doc.line(M, 16.6, W - M, 16.6);
+        }
+        doc.setDrawColor(...LINEA); doc.setLineWidth(0.25); doc.line(M, Hh - 11.5, W - M, Hh - 11.5);
+        font("normal", 7.4, MUTED); doc.text(doc.splitTextToSize(pie, L - 60)[0] || "", M, Hh - 7.2);
+        doc.text(`Stampato il ${oggi()}`, W / 2, Hh - 7.2, { align: "center" });
+        font("bold", 7.4, NAVY); doc.text(`Pagina ${i} di ${n}`, W - M, Hh - 7.2, { align: "right" });
       }
-      const nome = [I.sez, I.sog, I.anno].filter(Boolean).join("_").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "stampa";
+      doc.setProperties({ title: winAnsi([I.sez, I.sog, I.anno].filter(Boolean).join(" - ")), author: ST || "Sandalia", creator: "Sandalia Gestionale" });
+      const nome = [I.sez, I.sog, I.anno].filter(Boolean).join("_").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "stampa";
       const esito = await salva(doc.output("blob"), `${nome}.pdf`);
       avviso(esito === "annullato" ? "Salvataggio annullato." : `PDF pronto: ${nome}.pdf`, esito === "annullato");
     } catch (e) { avviso(`PDF non riuscito: ${e.message || e}`, true); }
@@ -1918,20 +1989,56 @@ $('#pdfBtn').addEventListener('click', () => stampaPortale('pdf'));
 .stampa-toast.err{background:#8a2119}
 .stampa-int{display:none}
 @media print{
-  @page{size:A4;margin:12mm}
-  html.stampa-on,html.stampa-on body{background:#fff!important;color:#000!important;color-scheme:light!important}
+  html.stampa-on,html.stampa-on body{background:#fff!important;color:#16212b!important;color-scheme:light!important}
   html.stampa-on body *:not(.stampa-asse):not(.stampa-root):not(.stampa-root *){display:none!important}
   html.stampa-on .stampa-asse{display:block!important;position:static!important;overflow:visible!important;height:auto!important;min-height:0!important;max-height:none!important;width:auto!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:#fff!important;grid-template-columns:none!important}
-  html.stampa-on .stampa-root{display:block!important;position:static!important;width:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
-  html.stampa-on .stampa-root *{color:#000!important;background:transparent!important;box-shadow:none!important;border-color:#bbb!important;text-shadow:none!important}
-  html.stampa-on .stampa-root button,html.stampa-on .stampa-root .drop,html.stampa-on .stampa-root input[type=file],html.stampa-on .stampa-root .acts,html.stampa-on .stampa-root .hint,html.stampa-on .stampa-root .bulk-bar,html.stampa-on .stampa-root input[type=checkbox],html.stampa-on .stampa-root .no-print,html.stampa-on .stampa-root dialog{display:none!important}
-  html.stampa-on .stampa-root .tbl-wrap,html.stampa-on .stampa-root .tw{overflow:visible!important;max-height:none!important}
-  html.stampa-on .stampa-root table{font-size:8.5pt!important;width:100%!important}
+  html.stampa-on .stampa-root{display:block!important;position:static!important;width:auto!important;max-width:none!important;margin:0!important;padding:0!important;overflow:visible!important;font-size:9.5pt!important}
+  html.stampa-on .stampa-root *{color:#16212b!important;background:transparent!important;box-shadow:none!important;border-color:#dde4eb!important;text-shadow:none!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  html.stampa-on .stampa-root button,html.stampa-on .stampa-root .drop,html.stampa-on .stampa-root input[type=file],html.stampa-on .stampa-root .acts,html.stampa-on .stampa-root .hint,html.stampa-on .stampa-root .note,html.stampa-on .stampa-root .bulk-bar,html.stampa-on .stampa-root input[type=checkbox],html.stampa-on .stampa-root .no-print,html.stampa-on .stampa-root dialog,html.stampa-on .stampa-root > h1,html.stampa-on .stampa-root .head{display:none!important}
+  /* copertina */
+  html.stampa-on .stampa-root .stampa-int{display:block!important;margin:0 0 16pt!important;break-inside:avoid}
+  html.stampa-on .stampa-root .stampa-int .si-top{display:flex!important;align-items:center;gap:10pt;background:#0E2131!important;border-bottom:3pt solid #A8761F!important;padding:11pt 14pt!important;border-radius:5pt 5pt 0 0}
+  html.stampa-on .stampa-root .stampa-int .si-mark{display:flex!important;align-items:center;justify-content:center;width:30pt;height:30pt;border-radius:7pt;background:var(--st-acc,#1C6597)!important;color:#fff!important;font:700 17pt/1 Helvetica,Arial,sans-serif}
+  html.stampa-on .stampa-root .stampa-int .si-brand{flex:1;display:block!important}
+  html.stampa-on .stampa-root .stampa-int .si-brand b{display:block!important;color:#fff!important;font:700 13pt/1.2 Helvetica,Arial,sans-serif}
+  html.stampa-on .stampa-root .stampa-int .si-brand span,html.stampa-on .stampa-root .stampa-int .si-meta span{display:block!important;color:#b0c2d1!important;font:400 8.5pt/1.4 Helvetica,Arial,sans-serif}
+  html.stampa-on .stampa-root .stampa-int .si-meta{display:block!important;text-align:right}
+  html.stampa-on .stampa-root .stampa-int .si-meta b{display:block!important;color:#fff!important;font:700 9.5pt/1.3 Helvetica,Arial,sans-serif;letter-spacing:.04em}
+  html.stampa-on .stampa-root .stampa-int .si-tit{display:block!important;margin:14pt 0 2pt!important;color:#0E2131!important;font:700 21pt/1.15 Helvetica,Arial,sans-serif}
+  html.stampa-on .stampa-root .stampa-int .si-sub{display:block!important;color:#586777!important;font:400 11.5pt/1.3 Helvetica,Arial,sans-serif}
+  html.stampa-on .stampa-root .stampa-int .si-riga{display:block!important;width:62pt;height:2.6pt;margin-top:9pt;background:var(--st-acc,#1C6597)!important}
+  /* contenuti */
+  html.stampa-on .stampa-root .card,html.stampa-on .stampa-root form.card{border:0!important;padding:0!important;margin:0 0 14pt!important;border-radius:0!important;break-inside:auto}
+  html.stampa-on .stampa-root h2{font:700 12.5pt/1.25 Helvetica,Arial,sans-serif!important;color:#0E2131!important;border-left:3.4pt solid var(--st-acc,#1C6597)!important;padding:1pt 0 1pt 7pt!important;margin:0 0 7pt!important;break-after:avoid}
+  html.stampa-on .stampa-root h3,html.stampa-on .stampa-root summary{font:700 10pt/1.3 Helvetica,Arial,sans-serif!important;color:var(--st-acc,#1C6597)!important;margin:6pt 0 4pt!important;break-after:avoid}
+  html.stampa-on .stampa-root .kpis,html.stampa-on .stampa-root .strip{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7pt!important;margin:0 0 14pt!important}
+  html.stampa-on .stampa-root .kpi,html.stampa-on .stampa-root .strip > *{display:block!important;background:#f7f9fb!important;border:.6pt solid #dde4eb!important;border-left:3.4pt solid var(--st-acc,#1C6597)!important;border-radius:4pt!important;padding:7pt 9pt!important;break-inside:avoid}
+  html.stampa-on .stampa-root .kpi .l{display:block!important;color:#586777!important;font:700 6.8pt/1.3 Helvetica,Arial,sans-serif!important;letter-spacing:.05em;text-transform:uppercase}
+  html.stampa-on .stampa-root .kpi .v{display:block!important;color:#0E2131!important;font:700 13pt/1.3 Helvetica,Arial,sans-serif!important}
+  html.stampa-on .stampa-root .kpi .s,html.stampa-on .stampa-root .sub,html.stampa-on .stampa-root .lead{color:#586777!important;font-size:7.6pt!important}
+  html.stampa-on .stampa-root .tbl-wrap,html.stampa-on .stampa-root .tw{overflow:visible!important;max-height:none!important;border:0!important;border-radius:0!important;margin:0 0 10pt!important}
+  html.stampa-on .stampa-root table{font-size:8.3pt!important;width:100%!important;border-collapse:collapse!important}
+  html.stampa-on .stampa-root thead{display:table-header-group!important}
+  html.stampa-on .stampa-root thead th{background:#0E2131!important;color:#fff!important;font:700 7.4pt/1.25 Helvetica,Arial,sans-serif!important;letter-spacing:.03em;text-transform:uppercase;padding:5.5pt 6pt!important;border:0!important;position:static!important}
+  html.stampa-on .stampa-root tbody td{padding:4.6pt 6pt!important;border:0!important;border-bottom:.5pt solid #dde4eb!important;vertical-align:top}
+  html.stampa-on .stampa-root tbody tr:nth-child(even) td{background:#f5f8fb!important}
+  html.stampa-on .stampa-root tfoot td,html.stampa-on .stampa-root tfoot th{background:#e5ecf2!important;color:#0E2131!important;font-weight:700!important;padding:5.5pt 6pt!important;border:0!important;border-top:1.4pt solid var(--st-acc,#1C6597)!important}
+  html.stampa-on .stampa-root td.num,html.stampa-on .stampa-root th.num{text-align:right!important;font-variant-numeric:tabular-nums;white-space:nowrap}
   html.stampa-on .stampa-root tr{break-inside:avoid}
-  html.stampa-on .stampa-root input,html.stampa-on .stampa-root select,html.stampa-on .stampa-root textarea{border:0!important;padding:0!important;appearance:none!important;-webkit-appearance:none!important;font:inherit!important}
-  html.stampa-on .stampa-root .card{border:1px solid #ccc!important;break-inside:auto;margin-bottom:8px!important}
-  html.stampa-on .stampa-int{display:block!important;margin:0 0 10px!important;padding:0 0 6px!important;border-bottom:1px solid #999!important;font:12pt/1.3 Helvetica,Arial,sans-serif}
-  html.stampa-on .stampa-int b{font-size:14pt}
+  html.stampa-on .stampa-root .lm > div{display:flex!important;justify-content:space-between;gap:12pt;padding:3.6pt 0!important;border-bottom:.5pt solid #dde4eb!important}
+  html.stampa-on .stampa-root .lm > div > span:first-child{color:#586777!important}
+  html.stampa-on .stampa-root .lm > div > span:last-child{font-weight:700;text-align:right}
+  html.stampa-on .stampa-root .notice,html.stampa-on .stampa-root .banner{background:#fbf3df!important;color:#5c3e08!important;border:0!important;border-left:3.4pt solid #A8761F!important;border-radius:3pt!important;padding:6pt 9pt!important;margin:0 0 10pt!important}
+  html.stampa-on .stampa-root .pill{border:.5pt solid #b9c4cf!important;border-radius:3pt!important;padding:1pt 4pt!important;font-size:6.6pt!important;color:#586777!important}
+  html.stampa-on .stampa-root .ok{color:#1D7552!important}
+  html.stampa-on .stampa-root .err,html.stampa-on .stampa-root .anom{color:#B0281F!important}
+  html.stampa-on .stampa-root strong{color:#0E2131!important}
+  html.stampa-on .stampa-root input,html.stampa-on .stampa-root select,html.stampa-on .stampa-root textarea{border:0!important;padding:0!important;appearance:none!important;-webkit-appearance:none!important;font:inherit!important;font-weight:700!important;min-width:0!important}
+  html.stampa-on .stampa-root .fld{color:#586777!important;font-size:7.6pt!important}
+  html.stampa-on .stampa-root .cols{display:block!important}
+  html.stampa-on .stampa-root .fld:has(.st-vuoto){display:none!important}
+  html.stampa-on .stampa-root input::-webkit-calendar-picker-indicator{display:none!important}
+  html.stampa-on .stampa-root table,html.stampa-on .stampa-root table *,html.stampa-on .stampa-root .mono{font-family:Helvetica,Arial,sans-serif!important;font-variant-numeric:tabular-nums}
 }`;
   const st = document.createElement("style"); st.textContent = CSS; (document.head || document.documentElement).appendChild(st);
   let tToast = null;
@@ -1942,14 +2049,25 @@ $('#pdfBtn').addEventListener('click', () => stampaPortale('pdf'));
     clearTimeout(tToast); tToast = setTimeout(() => { el.hidden = true; }, err ? 7000 : 4500);
   }
   function stampa() {
-    const root = pannello(), I = info(), asse = [];
+    const root = pannello(), I = info(), asse = [], acc = accento(), ST = studio();
     for (let p = root.parentElement; p && p !== document.documentElement; p = p.parentElement) { p.classList.add("stampa-asse"); asse.push(p); }
     root.classList.add("stampa-root");
+    const vuoti = [...root.querySelectorAll("input,select,textarea")].filter(x => x.type !== "checkbox" && x.type !== "radio" && !String(x.tagName === "SELECT" ? (x.options[x.selectedIndex]?.text || "").replace(/^[—–-]$/, "") : x.value).trim());
+    vuoti.forEach(x => x.classList.add("st-vuoto"));
+    document.documentElement.style.setProperty("--st-acc", `rgb(${acc.join(",")})`);
     const int = document.createElement("div"); int.className = "stampa-int";
-    int.innerHTML = `<b></b><div></div>`; int.querySelector("b").textContent = [I.sez, I.sog].filter(Boolean).join(" · ") || I.app; int.querySelector("div").textContent = [I.app, I.anno ? `esercizio ${I.anno}` : "", `stampato il ${oggi()}`].filter(Boolean).join(" · ");
+    int.innerHTML = `<div class="si-top"><span class="si-mark">S</span><div class="si-brand"><b></b><span></span></div><div class="si-meta"><b></b><span></span></div></div><div class="si-tit"></div><div class="si-sub"></div><div class="si-riga"></div>`;
+    const q = s => int.querySelector(s);
+    q(".si-brand b").textContent = ST || "Sandalia"; q(".si-brand span").textContent = I.app;
+    q(".si-meta b").textContent = I.anno ? `ESERCIZIO ${I.anno}` : ""; q(".si-meta span").textContent = `Stampato il ${oggi()}`;
+    q(".si-tit").textContent = I.sez || I.app; q(".si-sub").textContent = I.sog; if (!I.sog) q(".si-sub").remove();
     root.prepend(int);
+    // margini, piè di pagina e numeri di pagina (dove il browser li gestisce)
+    const css = t => `"${String(t).replace(/["\\]/g, " ")}"`, pg = document.createElement("style");
+    pg.textContent = `@page{size:A4;margin:13mm 13mm 16mm;@bottom-left{content:${css([ST || "Sandalia", I.app].join("  ·  "))};font:7.5pt Helvetica,Arial,sans-serif;color:#586777}@bottom-center{content:${css([I.sez, I.sog].filter(Boolean).join("  ·  "))};font:7.5pt Helvetica,Arial,sans-serif;color:#586777}@bottom-right{content:"Pagina " counter(page) " di " counter(pages);font:700 7.5pt Helvetica,Arial,sans-serif;color:#0E2131}}`;
+    document.head.appendChild(pg);
     document.documentElement.classList.add("stampa-on");
-    const fine = () => { document.documentElement.classList.remove("stampa-on"); root.classList.remove("stampa-root"); asse.forEach(p => p.classList.remove("stampa-asse")); int.remove(); };
+    const fine = () => { document.documentElement.classList.remove("stampa-on"); document.documentElement.style.removeProperty("--st-acc"); root.classList.remove("stampa-root"); vuoti.forEach(x => x.classList.remove("st-vuoto")); asse.forEach(p => p.classList.remove("stampa-asse")); int.remove(); pg.remove(); };
     const t0 = performance.now(); let ko = false;
     try { window.print(); } catch (e) { ko = true; }
     const dt = performance.now() - t0;
