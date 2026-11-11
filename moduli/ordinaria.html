@@ -815,7 +815,7 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
     <div class="notice" id="rip-fatta" hidden></div>
     <div class="card" id="blu-card">
       <div class="row"><h2>Importa la contabilità da Blustring</h2><span class="spacer"></span><button class="btn small" id="blu-svuota" type="button">Ricomincia</button></div>
-      <p class="note">Carica i file esportati da Blustring: mastrino giornale (XLS) e libro giornale (CSV) sono necessari, perché il mastrino numera le registrazioni e il CSV riporta gli importi in dare. Piano dei conti, bilancio di verifica, partitari e registro cespiti completano l'importazione: saldi al 1° gennaio, abbinamenti di incassi e pagamenti, cespiti e controllo dei saldi.</p>
+      <p class="note">Carica i file esportati da Blustring: mastrino giornale (XLS) e libro giornale (CSV) sono necessari, perché il mastrino numera le registrazioni e il CSV riporta gli importi in dare. Piano dei conti, bilancio di verifica, partitari, registro cespiti e anagrafiche di clienti e fornitori (CSV) completano l'importazione: saldi al 1° gennaio, abbinamenti di incassi e pagamenti, cespiti, codici fiscali, partite IVA e indirizzi. Le anagrafiche si possono caricare anche dopo, da sole.</p>
       <div class="drop" id="drop-blu" tabindex="0" role="button" aria-label="Seleziona i file esportati da Blustring">
         <strong>Trascina qui i file esportati da Blustring</strong>
         <span class="hint">Puoi selezionarli tutti insieme: ognuno viene riconosciuto dal contenuto</span>
@@ -1264,7 +1264,13 @@ function subAzienda() {
   pdcAz = []; aggiornaPdcOv();
   if (!S.aziendaId) return renderAll();
   S.unsub.push(S.db.collection("pdc").where("scope", "==", S.aziendaId).limit(1000).onSnapshot(s => { pdcAz = s.docs.map(d => ({ id: d.id, ...d.data() })); aggiornaPdcOv(); }, () => {}));
-  S.unsub.push(S.db.collection("anagrafiche").where("aziendaId", "==", S.aziendaId).limit(1000).onSnapshot(s => { S.anag = s.docs.map(d => ({ id: d.id, ...d.data() })); renderAll(); }, () => {}));
+  // clienti e fornitori letti separatamente: fino a 1000 nominativi per tipo
+  const anP = { C: [], F: [] };
+  for (const tp of ["C", "F"]) S.unsub.push(S.db.collection("anagrafiche").where("aziendaId", "==", S.aziendaId).where("tipo", "==", tp).limit(1000).onSnapshot(s => {
+    anP[tp] = s.docs.map(d => ({ id: d.id, ...d.data() })); S.anag = anP.C.concat(anP.F);
+    if (s.size >= 1000) log("Archivio", `Più di 1000 ${tp === "C" ? "clienti" : "fornitori"}: alcuni non sono visualizzati`, "err");
+    renderAll();
+  }, () => {}));
   const parti = { cur: [[], [], [], []], prec: [[], [], [], []] }, mesi = { cur: {}, prec: {} };
   const unisci = () => {
     const u = k => { const m = new Map(); for (const r of parti[k].flat()) m.set(r.id, r); for (const l of Object.values(mesi[k])) for (const r of l) m.set(r.id, r); return [...m.values()]; };
@@ -2643,6 +2649,7 @@ $("#btn-csv-pdc").addEventListener("click", async () => {
 S.selAn = new Set();
 const fattAgg = k => !k ? "" : k === 1 ? " Aggiornata una fattura da confermare." : ` Aggiornate ${k} fatture da confermare.`;
 function parAvviso(t) { const m = $("#par-msg"); m.textContent = t || ""; m.hidden = !t; }
+const indirizzoAn = a => [a.indirizzo, [a.cap, a.comune].filter(Boolean).join(" ") + (a.prov ? ` (${a.prov})` : ""), a.paese && a.paese !== "IT" ? a.paese : ""].map(x => String(x || "").trim()).filter(Boolean).join(" · ");
 function righeAnag() {
   const tipo = S.parMode, q = $("#par-cerca").value.trim().toLowerCase(), f = $("#par-filtro").value;
   const docs = tutteRegs().filter(r => r.partita?.tipo === tipo);
@@ -2650,7 +2657,7 @@ function righeAnag() {
     const d = docs.filter(r => r.anagId === a.id), tot = r2(d.reduce((s, r) => s + r.partita.totale, 0)), ab = r2(d.reduce((s, r) => s + abbinatoA(r.id), 0));
     return { a, d, tot, ab, res: r2(tot - ab) };
   });
-  if (q) rows = rows.filter(x => [x.a.denominazione, x.a.piva, x.a.cf, x.a.conto, descConto(x.a.conto)].join(" ").toLowerCase().includes(q));
+  if (q) rows = rows.filter(x => [x.a.denominazione, x.a.piva, x.a.cf, x.a.conto, descConto(x.a.conto), x.a.comune, x.a.codBlustring].join(" ").toLowerCase().includes(q));
   if (f === "aperte") rows = rows.filter(x => Math.abs(x.res) >= 0.01);
   if (f === "senza") rows = rows.filter(x => !x.a.conto);
   return rows.sort((x, y) => String(x.a.denominazione).localeCompare(String(y.a.denominazione), "it"));
@@ -2670,7 +2677,7 @@ function renderPar() {
     const a = x.a, sel = S.selAn.has(a.id);
     return `<tr data-an="${esc(a.id)}"${sel ? ' class="sel"' : ""}>
       <td><input type="checkbox" data-sel aria-label="Seleziona"${sel ? " checked" : ""}></td>
-      <td><input data-f="denominazione" value="${esc(a.denominazione)}" aria-label="Denominazione" style="width:220px"></td>
+      <td><input data-f="denominazione" value="${esc(a.denominazione)}" aria-label="Denominazione" style="width:220px">${indirizzoAn(a) ? `<div class="sub">${esc(indirizzoAn(a))}</div>` : ""}</td>
       <td><input class="mono" data-f="piva" value="${esc(a.piva || "")}" maxlength="11" placeholder="Partita IVA" aria-label="Partita IVA" style="width:130px"><input class="mono" data-f="cf" value="${esc(a.cf || "")}" maxlength="16" placeholder="Codice fiscale" aria-label="Codice fiscale" style="width:170px;display:block;margin-top:4px"></td>
       <td><input class="cf mono" data-conto data-f="conto" value="${esc(a.conto || "")}" placeholder="Nessuno" aria-label="Conto abituale" style="width:140px">
         <div class="sub">${esc(descConto(a.conto))}${a.conto ? ` <span class="pill ${a.contoFisso ? "src" : "media"}">${a.contoFisso ? "fisso" : "appreso"}</span>` : ""}</div></td>
@@ -5114,7 +5121,7 @@ $("#btn-bil-xbrl").addEventListener("click", async () => {
 const BLU_S1 = {"360400":"71.01.51.95","unicre":"19.01.01","31065a":"63.05.90","410110":"47.11.03","250345":"35.01.03","115260":"35.05.51","25061a":"39.05.51","315020":"65.01.05.99","210210":"31.03.15","355300":"75.01.07","250225":"39.05.03","250200":"39.07.01","13050a":"19.03.05","350130":"59.01.05","250330":"35.03.01","250430":"37.01.01","25043c":"37.01.03","250450":"37.01.15","350100":"63.05.13.99","31031a":"61.05.11.99","21002a":"31.03.51","ammcon":"61.05.11.99","250325":"35.03.05","250610":"39.05.51","355200":"75.03.09","36049a":"71.03.03","250410":"37.01.05","310000":"67.01.01.99","310180":"67.01.03.99","31018b":"67.01.09.99","310310":"61.05.01.99","365385":"71.03.17","420350":"53.01.29","115245":"35.01.01","leasin":"65.03.07","330510":"63.03.01.99","viaggi":"63.01.13","365100":"71.03.09","30112a":"55.03.01","325100":"59.01.01","301120":"55.07.51","325110":"59.03.01.99","320030":"57.09.03","310720":"61.01.01.03","105030":"05.03.11","301510":"55.07.03","345110":"59.03.15.99","330500":"63.03.03.99","310730":"61.01.11.99","indume":"55.07.23","301410":"55.07.03","serviz":"63.05.11","115250":"35.01.14","36045a":"71.01.90","320100":"57.09.13.99","visite":"67.03.25","310740":"61.01.11.99","32550a":"57.05.01.99","430100":"53.01.19.99","250320":"35.01.11","365350":"55.07.98","355110":"75.01.01","365300":"71.03.51","man20x":"59.03.15.99","carb20":"59.03.01.99","320210":"57.09.17","250440":"37.01.19","noleg1":"65.05.15","nolegg":"65.03.05.99","sertel":"57.09.07","305420":"57.01.01.99","345200":"57.11.07.99","345100":"57.11.07.99","360445":"59.01.11","altrix":"75.03.51","360430":"71.01.07","330210":"63.01.01.99","230010":"29.01.01","250650":"39.05.51","105080":"05.07.15","ivaspl":"35.01.49","250010":"39.01.07","410010":"47.01.03","301100":"55.01.01","301001":"55.01.01","301610":"55.01.09","320010":"57.09.01.99","320020":"57.09.01.99","10507a":"05.07.07","105070":"05.07.01","325500":"57.05.01.99","365380":"63.01.09.99","365120":"57.09.21","105025":"05.03.09","105040":"05.05.51","105060":"05.07.05","105075":"05.07.09","specos":"03.01.01","105405":"15.05.03","115020":"11.03.01","115110":"15.05.03","115215":"35.07.03","115270":"35.05.01","130500":"19.03.03","180200":"21.01.03","250000":"33.03.01","250315":"35.07.01","260010":"41.07.03","260020":"41.09.09","260030":"41.09.07","260050":"41.05.09","260060":"41.09.05","260070":"41.05.11","280000":"23.01.01.99","280110":"25.01.01.99","280300":"23.01.05.99","280315":"23.01.17.99"};
 const BLU_CLI = "115020", BLU_FOR = "250000";   // conti riepilogativi di clienti e fornitori nel bilancio di Blustring
 let BLU = bluVuoto();
-function bluVuoto() { return { file: {}, X: null, C: null, pdc: null, bil: null, part: [], ces: null, mappa: {}, fonteMappa: {}, ric: null, conti: [], ape: null, avvisi: [] }; }
+function bluVuoto() { return { file: {}, X: null, C: null, pdc: null, bil: null, part: [], ces: null, mappa: {}, fonteMappa: {}, ric: null, conti: [], ape: null, avvisi: [], anag: { C: null, F: null } }; }
 const bluEnt = s => String(s ?? "").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").trim();
 const bluNc = s => bluEnt(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
 const bluNd = s => bluEnt(s).toUpperCase().replace(/\bAMP\b/g, "").replace(/[^A-Z0-9]/g, "");
@@ -5316,6 +5323,79 @@ function bluControlloCE() {
   return { n: ce.length, diff, utile: r2(ric - cos) };
 }
 
+/* ---------- anagrafiche di clienti e fornitori (CSV "Codice; Descrizione; Codice fiscale; Partita IVA; …") ---------- */
+const BLU_PROV = (() => {
+  const t = "Agrigento AG|Alessandria AL|Ancona AN|Aosta AO|Valle d'Aosta AO|Arezzo AR|Ascoli Piceno AP|Asti AT|Avellino AV|Bari BA|Barletta-Andria-Trani BT|Belluno BL|Benevento BN|Bergamo BG|Biella BI|Bologna BO|Bolzano BZ|Brescia BS|Brindisi BR|Cagliari CA|Caltanissetta CL|Campobasso CB|Carbonia-Iglesias CI|Caserta CE|Catania CT|Catanzaro CZ|Chieti CH|Como CO|Cosenza CS|Cremona CR|Crotone KR|Cuneo CN|Enna EN|Fermo FM|Ferrara FE|Firenze FI|Foggia FG|Forli-Cesena FC|Forlì-Cesena FC|Frosinone FR|Genova GE|Gorizia GO|Grosseto GR|Imperia IM|Isernia IS|La Spezia SP|L'Aquila AQ|Latina LT|Lecce LE|Lecco LC|Livorno LI|Lodi LO|Lucca LU|Macerata MC|Mantova MN|Massa-Carrara MS|Massa Carrara MS|Matera MT|Medio Campidano VS|Messina ME|Milano MI|Modena MO|Monza e Brianza MB|Monza e della Brianza MB|Napoli NA|Novara NO|Nuoro NU|Ogliastra OG|Olbia-Tempio OT|Olbia - Tempio OT|Gallura Nord-Est Sardegna OT|Oristano OR|Padova PD|Palermo PA|Parma PR|Pavia PV|Perugia PG|Pesaro e Urbino PU|Pesaro-Urbino PU|Pescara PE|Piacenza PC|Pisa PI|Pistoia PT|Pordenone PN|Potenza PZ|Prato PO|Ragusa RG|Ravenna RA|Reggio Calabria RC|Reggio di Calabria RC|Reggio Emilia RE|Reggio nell'Emilia RE|Rieti RI|Rimini RN|Roma RM|Rovigo RO|Salerno SA|Sassari SS|Savona SV|Siena SI|Siracusa SR|Sondrio SO|Sud Sardegna SU|Taranto TA|Teramo TE|Terni TR|Torino TO|Trapani TP|Trento TN|Treviso TV|Trieste TS|Udine UD|Varese VA|Venezia VE|Verbano-Cusio-Ossola VB|Vercelli VC|Verona VR|Vibo Valentia VV|Vicenza VI|Viterbo VT";
+  const m = {}; for (const x of t.split("|")) { const i = x.lastIndexOf(" "); m[x.slice(0, i).toUpperCase().normalize("NFD").replace(/[^A-Z0-9]/g, "")] = x.slice(i + 1); }
+  return m;
+})();
+const BLU_PAESI = new Set("AT BE BG CY HR DK EE FI FR DE EL GR IE LV LT LU MT NL PL PT CZ RO SK SI ES SE HU GB CH NO SM VA US XI IT".split(" "));
+const bluTesto = b => { try { return new TextDecoder("utf-8", { fatal: true }).decode(b); } catch { return new TextDecoder("windows-1252").decode(b); } };
+// Blustring esporta "&amp;" e "&apos;" senza & e ;: "ROSSI amp C." → "ROSSI & C."
+const bluPulisci = s => { const v = bluEnt(s).replace(/(^|[^a-z])amp(?![a-z])/g, "$1&").replace(/(^|[^a-z])apos(?![a-z])/g, "$1'").replace(/\s+/g, " ").trim(); return /^TAGASSENTE$/i.test(v) ? "" : v; };
+function bluPivaOk(p) { if (!/^\d{11}$/.test(p)) return false; let s = 0; for (let i = 0; i < 11; i++) { let d = +p[i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } s += d; } return s % 10 === 0; }
+function bluLeggiAnag(testo) {
+  const lines = testo.split(/\r?\n/);
+  if (!/^\s*codice\s*;\s*descrizione\s*;\s*codice fiscale\s*;\s*partita iva/i.test(lines[0] || "")) return null;
+  const out = [];
+  for (const l of lines.slice(1)) {
+    const f = l.split(";").map(x => x.trim()), cod = f[0];
+    if (!cod) continue;
+    let piva = String(f[3] || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), cf = String(f[2] || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), paese = "";
+    const pref = piva.match(/^([A-Z]{2})(?=[A-Z0-9]*\d)/);
+    if (pref && BLU_PAESI.has(pref[1])) { paese = pref[1] === "EL" ? "GR" : pref[1]; piva = piva.slice(2); }
+    const cap = /^\d{4,7}$/.test(f[7] || "") ? f[7] : "", prov = BLU_PROV[bluNc(f[8]).normalize("NFD").replace(/[^A-Z0-9]/g, "")] || "";
+    const cf16 = /^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/.test(cf);
+    if (!paese && (prov || cf16 || ((bluPivaOk(piva) || bluPivaOk(cf)) && /^\d{5}$/.test(cap)))) paese = "IT";
+    if (paese !== "IT") cf = "";                              // per i soggetti esteri Blustring ripete l'identificativo IVA
+    else if (!cf16 && !/^\d{11}$/.test(cf)) cf = "";
+    out.push({ cod, nome: bluPulisci(f[1]) || cod, cf, piva, paese, indirizzo: bluPulisci([f[4], f[5]].filter(Boolean).join(", ")), comune: /^\d+$/.test(f[6] || "") ? "" : bluPulisci(f[6]), cap: paese === "IT" && !/^\d{5}$/.test(cap) ? "" : cap, prov: paese === "IT" ? prov : "" });
+  }
+  return out;
+}
+/* completa le anagrafiche esistenti (per codice Blustring, partita IVA, codice fiscale o denominazione) e crea quelle mancanti con codice fiscale o partita IVA */
+function bluAnagUnisci(out, adesso, gia = []) {
+  const pool = new Map(S.anag.map(a => [a.id, a])), mie = new Set();
+  for (const a of gia) { pool.set(a.id, a); mie.add(a.id); }
+  const campi = ["piva", "cf", "paese", "indirizzo", "comune", "cap", "prov"];
+  let agg = 0, nuove = 0;
+  for (const tipo of ["C", "F"]) for (const r of BLU.anag[tipo] || []) {
+    const lista = [...pool.values()].filter(a => a.tipo === tipo), cu = r.cod.toUpperCase(), pc = soloCifre(r.piva), nd = bluNd(r.nome);
+    const a = lista.find(x => String(x.codBlustring || "").toUpperCase() === cu)
+      || (pc.length >= 7 && lista.find(x => soloCifre(x.piva) === pc))
+      || (r.cf && lista.find(x => String(x.cf || "").toUpperCase() === r.cf))
+      || (nd && lista.find(x => !x.codBlustring && bluNd(x.denominazione) === nd));
+    if (a) {
+      const patch = {};
+      for (const k of campi) if (r[k] && !a[k]) patch[k] = r[k];
+      if (!a.codBlustring) patch.codBlustring = r.cod;
+      if (!Object.keys(patch).length) continue;
+      if (mie.has(a.id)) Object.assign(a, patch);
+      else { const n = { ...a, ...patch }; pool.set(n.id, n); mie.add(n.id); out.push(["anagrafiche", n]); }
+      if (campi.some(k => patch[k])) agg++;
+    } else if (r.piva || r.cf) {
+      const n = { id: uid(), aziendaId: S.aziendaId, tipo, denominazione: r.nome, piva: r.piva, cf: r.cf, paese: r.paese, indirizzo: r.indirizzo, comune: r.comune, cap: r.cap, prov: r.prov, conto: "", codBlustring: r.cod, creato: adesso, fonte: "blustring" };
+      pool.set(n.id, n); mie.add(n.id); out.push(["anagrafiche", n]); nuove++;
+    }
+  }
+  return { agg, nuove };
+}
+async function bluAnagAggiorna() {
+  if (!aziendaCorrente()) return bluMsg("Crea o seleziona prima l'azienda", "err");
+  const out = [], { agg, nuove } = bluAnagUnisci(out, new Date().toISOString());
+  if (!out.length) return bluMsg("Le anagrafiche di clienti e fornitori sono già complete.", "ok");
+  bluInCorso = true; renderBlu();
+  const msg = t => { const el = $("#blu-imp-msg"); if (el) el.textContent = t; };
+  try {
+    msg(`Salvataggio di ${out.length} anagrafiche…`);
+    await bluScrivi(out, (i, n) => msg(`Salvataggio… ${i} di ${n}`));
+    log("Anagrafiche da Blustring", `${agg} completate, ${nuove} nuove`, "ok");
+    BLU.anag = { C: null, F: null }; delete BLU.file.anagC; delete BLU.file.anagF;
+    msg(""); bluMsg(`Anagrafiche aggiornate: ${agg} clienti e fornitori completati con codice fiscale, partita IVA e indirizzo${nuove ? `, ${nuove} nuovi nominativi aggiunti` : ""}.`, "ok");
+  } catch (e) { msg(""); bluMsg(`Aggiornamento non riuscito: ${e.message || e}`, "err"); }
+  finally { bluInCorso = false; renderBlu(); }
+}
+
 /* ---------- interfaccia ---------- */
 async function bluCarica(files) {
   if (!aziendaCorrente()) return bluMsg("Crea o seleziona prima l'azienda", "err");
@@ -5324,7 +5404,14 @@ async function bluCarica(files) {
     bluMsg(`Lettura di ${f.name}…`, "work");
     try {
       if (/\.(csv|txt)$/i.test(f.name)) {
-        const c = bluLeggiCsv(decodifica(new Uint8Array(await f.arrayBuffer())));
+        const testo = bluTesto(new Uint8Array(await f.arrayBuffer())), an = bluLeggiAnag(testo);
+        if (an) {
+          const tipo = /fornit/i.test(f.name) ? "F" : /client/i.test(f.name) ? "C" : "";
+          if (!tipo) { letti.push(`${f.name}: anagrafica riconosciuta, ma dal nome del file non si capisce se sono clienti o fornitori (rinominalo, ad esempio Clienti.csv)`); continue; }
+          BLU.anag[tipo] = an; BLU.file["anag" + tipo] = { nome: f.name, n: an.length };
+          letti.push(`${f.name}: anagrafica ${tipo === "C" ? "clienti" : "fornitori"}, ${an.length} nominativi`); continue;
+        }
+        const c = bluLeggiCsv(testo);
         if (!c) { letti.push(`${f.name}: non è il libro giornale CSV di Blustring`); continue; }
         BLU.C = c; BLU.file.csv = { nome: f.name, n: c.length }; letti.push(`${f.name}: libro giornale, ${c.length} righe`); continue;
       }
@@ -5369,7 +5456,7 @@ function bluErrori() {
 function renderBlu() {
   const box = $("#blu-card"); if (!box) return;
   const f = BLU.file, voce = (k, nome, obbl) => `<div><span>${nome}${obbl ? " <span class=\"pill media\">necessario</span>" : ""}</span><span class="mono">${f[k] ? esc(f[k].nome) : "—"}</span></div>`;
-  $("#blu-file").innerHTML = voce("giornale", "Mastrino giornale (XLS)", true) + voce("csv", "Libro giornale (CSV)", true) + voce("pdc", "Piano dei conti") + voce("sp", "Bilancio di verifica · stato patrimoniale") + voce("ce", "Bilancio di verifica · conto economico") + voce("partC", "Partitario clienti") + voce("partF", "Partitario fornitori") + voce("ces", "Registro cespiti");
+  $("#blu-file").innerHTML = voce("giornale", "Mastrino giornale (XLS)", true) + voce("csv", "Libro giornale (CSV)", true) + voce("pdc", "Piano dei conti") + voce("sp", "Bilancio di verifica · stato patrimoniale") + voce("ce", "Bilancio di verifica · conto economico") + voce("partC", "Partitario clienti") + voce("partF", "Partitario fornitori") + voce("ces", "Registro cespiti") + voce("anagC", "Anagrafica clienti") + voce("anagF", "Anagrafica fornitori");
   const vis = !!BLU.conti.length, det = $("#blu-conti-box"); det.hidden = !vis;
   if (vis) {
     const nDa = BLU.conti.filter(x => !contoOk(BLU.mappa[x.cod])).length;
@@ -5395,6 +5482,11 @@ function renderBlu() {
   else if (R) righe.push(`<div><span>Saldi al 1° gennaio</span><span class="mono">carica il bilancio di verifica (stato patrimoniale) per riprenderli</span></div>`);
   if (BLU.part.length) righe.push(`<div><span>Partite di clienti e fornitori con incassi e pagamenti da abbinare</span><span class="mono">${BLU.part.length} documenti</span></div>`);
   if (BLU.ces) righe.push(`<div><span>Cespiti da riportare nel registro</span><span class="mono">${BLU.ces.length}</span></div>`);
+  if (BLU.anag.C || BLU.anag.F) {
+    const conId = l => (l || []).filter(r => r.piva || r.cf).length;
+    righe.push(`<div><span>Anagrafiche con codice fiscale o partita IVA</span><span class="mono">${conId(BLU.anag.C)} clienti · ${conId(BLU.anag.F)} fornitori</span></div>`);
+    if (!BLU.X && !BLU.C) righe.push(`<div><span>${aziendaCorrente()?.ripresa?.blustring ? "La contabilità è già importata: puoi completare le anagrafiche senza ripetere l'importazione." : "Puoi importare solo le anagrafiche, senza le registrazioni."}</span><span><button class="btn small pri" type="button" id="blu-anag-agg"${bluInCorso ? " disabled" : ""}>Aggiorna le anagrafiche</button></span></div>`);
+  }
   const err = bluErrori();
   if (R || BLU.X || BLU.C) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">Pronto per l'importazione</span><span></span></div>`);
   $("#blu-riepilogo").innerHTML = righe.join("");
@@ -5470,6 +5562,7 @@ async function bluImporta() {
       else if (!a.codBlustring) { a = { ...a, codBlustring: cod }; out.push(["anagrafiche", a]); }
       anag.set(cod, a);
     }
+    const datiAn = BLU.anag.C || BLU.anag.F ? bluAnagUnisci(out, adesso, out.filter(([c]) => c === "anagrafiche").map(([, o]) => o)) : null;
     const contoDi = cod => tipi.has(cod) ? (tipi.get(cod) === "C" ? K.clienti : K.fornitori) : BLU.mappa[cod];
     const base = { iva: [], fonte: "blustring", file: "Blustring", ripresaId: rid, aziendaId: S.aziendaId, anno, creato: adesso };
     const nuovaReg = (o) => ({ ...base, abbinamenti: [], ...o, trim: trimDi(o.dataReg), mese: Number(o.dataReg.slice(5, 7)) });
@@ -5593,7 +5686,7 @@ async function bluImporta() {
     log("Importazione Blustring", `${regs.length} registrazioni, ${anag.size} clienti e fornitori, ${nAbb} abbinamenti${nCes ? `, ${nCes} cespiti` : ""}`, "ok");
     const fine = BLU.ric.ultima; BLU = bluVuoto(); renderBlu();
     msg("");
-    bluMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(fine)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${nonAbb.length ? ` (${nonAbb.length} del partitario da abbinare a mano)` : ""}${nCes ? `, ${nCes} cespiti nel registro` : ""}. Le liquidazioni IVA fino al ${itDate(fine)} restano quelle di Blustring.`, "ok");
+    bluMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(fine)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${nonAbb.length ? ` (${nonAbb.length} del partitario da abbinare a mano)` : ""}${nCes ? `, ${nCes} cespiti nel registro` : ""}${datiAn ? `; anagrafiche: ${datiAn.agg} completate con codice fiscale, partita IVA e indirizzo, ${datiAn.nuove} nominativi aggiunti` : ""}. Le liquidazioni IVA fino al ${itDate(fine)} restano quelle di Blustring.`, "ok");
   } catch (e) {
     msg(""); bluMsg(`Importazione non riuscita: ${e.message || e}`, "err");
   } finally { bluInCorso = false; renderBlu(); }
@@ -5618,6 +5711,7 @@ async function bluElimina(ids) {
   $("#blu-conti-box").addEventListener("toggle", e => { e.currentTarget.dataset.toccato = "1"; });
   $("#blu-agente").addEventListener("click", () => bluAgente().catch(e => bluMsg(`Agente non disponibile: ${e.message || e}`, "err")));
   $("#blu-importa").addEventListener("click", bluImporta);
+  $("#blu-riepilogo").addEventListener("click", e => { if (e.target.closest("#blu-anag-agg")) bluAnagAggiorna(); });
   $("#blu-conti-body").addEventListener("conto", e => { const tr = e.target.closest("tr[data-blu]"); if (!tr) return; BLU.mappa[tr.dataset.blu] = e.detail; BLU.fonteMappa[tr.dataset.blu] = "manuale"; bluSalvaMappa(); renderBlu(); });
   $("#blu-conti-body").addEventListener("change", e => { const tr = e.target.closest("tr[data-blu]"); if (!tr || !e.target.matches("[data-blu-conto]")) return; BLU.mappa[tr.dataset.blu] = e.target.value.trim(); BLU.fonteMappa[tr.dataset.blu] = "manuale"; bluSalvaMappa(); renderBlu(); });
 })();
