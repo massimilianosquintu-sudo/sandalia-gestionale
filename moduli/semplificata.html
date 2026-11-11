@@ -5212,6 +5212,7 @@ function bluTipo(nomeFoglio, righe) {
   if (ha("sezionebil") && ha("idkontol3")) return "bilancio";
   if (ha("totfat2") && ha("pagato3")) return /fornit/i.test(nomeFoglio) ? "partF" : /client/i.test(nomeFoglio) ? "partC" : "part";
   if (ha("desccespite") && ha("cespitee")) return "cespiti";
+  if (h[0] === "codice" && ha("descrizione") && ha("codice fiscale") && ha("partita iva")) return "anag";
   return "";
 }
 function bluLeggiGiornale(righe) {
@@ -5401,24 +5402,31 @@ const bluTesto = b => { try { return new TextDecoder("utf-8", { fatal: true }).d
 // Blustring esporta "&amp;" e "&apos;" senza & e ;: "ROSSI amp C." → "ROSSI & C."
 const bluPulisci = s => { const v = bluEnt(s).replace(/(^|[^a-z])amp(?![a-z])/g, "$1&").replace(/(^|[^a-z])apos(?![a-z])/g, "$1'").replace(/\s+/g, " ").trim(); return /^TAGASSENTE$/i.test(v) ? "" : v; };
 function bluPivaOk(p) { if (!/^\d{11}$/.test(p)) return false; let s = 0; for (let i = 0; i < 11; i++) { let d = +p[i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } s += d; } return s % 10 === 0; }
+function bluAnagRiga(f) {
+  const V = k => String(f[k] ?? "").trim(), cod = V(0);
+  if (!cod) return null;
+  let piva = V(3).toUpperCase().replace(/[^A-Z0-9]/g, ""), cf = V(2).toUpperCase().replace(/[^A-Z0-9]/g, ""), paese = "";
+  const pref = piva.match(/^([A-Z]{2})(?=[A-Z0-9]*\d)/);
+  if (pref && BLU_PAESI.has(pref[1])) { paese = pref[1] === "EL" ? "GR" : pref[1]; piva = piva.slice(2); }
+  const capG = /^\d{3,7}$/.test(V(7)) ? V(7) : "", prov = BLU_PROV[bluNc(V(8)).normalize("NFD").replace(/[^A-Z0-9]/g, "")] || "";
+  const cf16 = /^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/.test(cf);
+  // Excel (o un CSV risalvato con Excel) toglie gli zeri iniziali: 02138030909 diventa 2138030909
+  const pad = x => /^\d{7,10}$/.test(x) ? x.padStart(11, "0") : x;
+  const ok = x => bluPivaOk(x) || (/^\d{9,10}$/.test(x) && bluPivaOk(pad(x)));
+  if (!paese && (prov || cf16 || ok(piva) || ok(cf))) paese = "IT";
+  let cap = capG;
+  if (paese === "IT") {
+    if (/^\d+$/.test(piva)) piva = pad(piva);
+    cf = cf16 ? cf : /^\d+$/.test(cf) && /[1-9]/.test(cf) ? pad(cf) : "";
+    if (!/[1-9]/.test(piva)) piva = "";
+    cap = /^\d{3,5}$/.test(capG) ? capG.padStart(5, "0") : "";
+  } else cf = "";                                            // per i soggetti esteri Blustring ripete l'identificativo IVA
+  return { cod, nome: bluPulisci(V(1)) || cod, cf, piva, paese, indirizzo: bluPulisci([V(4), V(5)].filter(Boolean).join(", ")), comune: /^\d+$/.test(V(6)) ? "" : bluPulisci(V(6)), cap, prov: paese === "IT" ? prov : "" };
+}
 function bluLeggiAnag(testo) {
   const lines = testo.split(/\r?\n/);
   if (!/^\s*codice\s*;\s*descrizione\s*;\s*codice fiscale\s*;\s*partita iva/i.test(lines[0] || "")) return null;
-  const out = [];
-  for (const l of lines.slice(1)) {
-    const f = l.split(";").map(x => x.trim()), cod = f[0];
-    if (!cod) continue;
-    let piva = String(f[3] || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), cf = String(f[2] || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), paese = "";
-    const pref = piva.match(/^([A-Z]{2})(?=[A-Z0-9]*\d)/);
-    if (pref && BLU_PAESI.has(pref[1])) { paese = pref[1] === "EL" ? "GR" : pref[1]; piva = piva.slice(2); }
-    const cap = /^\d{4,7}$/.test(f[7] || "") ? f[7] : "", prov = BLU_PROV[bluNc(f[8]).normalize("NFD").replace(/[^A-Z0-9]/g, "")] || "";
-    const cf16 = /^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/.test(cf);
-    if (!paese && (prov || cf16 || ((bluPivaOk(piva) || bluPivaOk(cf)) && /^\d{5}$/.test(cap)))) paese = "IT";
-    if (paese !== "IT") cf = "";                              // per i soggetti esteri Blustring ripete l'identificativo IVA
-    else if (!cf16 && !/^\d{11}$/.test(cf)) cf = "";
-    out.push({ cod, nome: bluPulisci(f[1]) || cod, cf, piva, paese, indirizzo: bluPulisci([f[4], f[5]].filter(Boolean).join(", ")), comune: /^\d+$/.test(f[6] || "") ? "" : bluPulisci(f[6]), cap: paese === "IT" && !/^\d{5}$/.test(cap) ? "" : cap, prov: paese === "IT" ? prov : "" });
-  }
-  return out;
+  return lines.slice(1).map(l => bluAnagRiga(l.split(";"))).filter(Boolean);
 }
 /* completa le anagrafiche esistenti (per codice Blustring, partita IVA, codice fiscale o denominazione) e crea quelle mancanti con codice fiscale o partita IVA */
 function bluAnagUnisci(out, adesso, gia = []) {
@@ -5495,6 +5503,14 @@ async function bluCarica(files) {
         const tipo = t === "partF" ? "F" : "C", p = bluLeggiPartite(righe, tipo);
         BLU.part = BLU.part.filter(x => x.tipo !== tipo).concat(p); BLU.file["part" + tipo] = { nome: f.name, n: p.length };
         letti.push(`${f.name}: partitario ${tipo === "C" ? "clienti" : "fornitori"}, ${p.length} documenti`);
+      }
+      else if (t === "anag") {
+        // Excel arrotonda i numeri di oltre 11 cifre (partite IVA lituane, ad esempio): quei valori non sono affidabili
+        let arr = 0;
+        const pulite = righe.slice(1).map(v => v.map((x, k) => (k === 2 || k === 3) && typeof x === "number" && Math.abs(x) >= 1e11 ? (arr++, "") : x));
+        const an = pulite.map(bluAnagRiga).filter(Boolean), tipo = /fornit/i.test(f.name + " " + nome) ? "F" : /client/i.test(f.name + " " + nome) ? "C" : "";
+        if (!tipo) letti.push(`${f.name}: anagrafica riconosciuta, ma dal nome del file non si capisce se sono clienti o fornitori (rinominalo, ad esempio Clienti.xlsx)`);
+        else { BLU.anag[tipo] = an; BLU.file["anag" + tipo] = { nome: f.name, n: an.length }; letti.push(`${f.name}: anagrafica ${tipo === "C" ? "clienti" : "fornitori"}, ${an.length} nominativi${arr ? ` (${arr} codici esteri arrotondati da Excel non letti: per quelli carica il CSV originale)` : ""}`); }
       }
       else if (t === "cespiti") { BLU.ces = bluLeggiCespiti(righe); BLU.file.ces = { nome: f.name, n: BLU.ces.length }; letti.push(`${f.name}: registro cespiti, ${BLU.ces.length} beni`); }
       else letti.push(`${f.name}: file non riconosciuto`);
