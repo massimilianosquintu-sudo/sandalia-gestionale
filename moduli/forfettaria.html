@@ -2598,6 +2598,56 @@ html.stampa-pdf .solo-stampa.st-attiva{display:block!important;position:absolute
   };
   window.portaleAggiorna = function () { if (!S.db) localRefresh(); };
 
+  /* Previsionale al 31/12: ricavi incassati e costi pagati fino a una data, letti dall'archivio del cliente */
+  const ceDataIt = d => /^\d{4}-\d{2}-\d{2}/.test(d || "") ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "";
+  const PREV_GEST = { separata: "gs", commercianti: "com", artigiani: "art", cassa: "cassa", nessuna: "no" };
+  window.portaleContoEconomico = async function (rif, opz) {
+    opz = opz || {};
+    if (!S.clienti || !S.clienti.length) return { errore: "archivio-vuoto" };
+    const cf = pulisci(rif.cf), pi = soloCifre(rif.piva || "");
+    const c = S.clienti.find(x => rif.forfId && x.id === rif.forfId)
+      || S.clienti.find(x => (cf && pulisci(x.cf) === cf) || (pi && soloCifre(x.piva) === pi));
+    if (!c) return { errore: "non-presente" };
+    const anno = Number(opz.anno) || S.anno, Y = String(anno);
+    let regs;
+    if (S.db) { const q = await S.db.collection("registrazioni").where("clienteId", "==", c.id).where("anno", "==", anno).limit(1000).get(); regs = q.docs.map(d => ({ id: d.id, ...d.data() })); }
+    else regs = lsLoad().regs.filter(r => r.clienteId === c.id && r.anno === anno);
+    const pagato = r => r.incassato && String(r.dataIncasso || "").startsWith(Y);
+    const ultima = regs.reduce((m, r) => (pagato(r) && r.dataIncasso > m ? r.dataIncasso : m), "");
+    const al = /^\d{4}-\d{2}-\d{2}$/.test(opz.al || "") ? opz.al : (ultima || `${Y}-12-31`);
+    const atts = attivitaCliente(c), acc = new Map();
+    const add = (k, o, val) => { const e = acc.get(k) || { ...o, v: 0 }; e.v += val; acc.set(k, e); };
+    let nonInc = 0;
+    for (const r of regs) {
+      const s = segno(r.tipo);
+      if (!pagato(r) || r.dataIncasso > al) { if (!r.incassato && TIPI_RICAVO.includes(r.tipo)) nonInc += s * (Number(r.imponibile) || 0); continue; }
+      if (isCosto(r.tipo)) {
+        const k = CONTI[r.conto] ? r.conto : "altri";
+        add("C|" + k, { sez: "C", code: "C." + (Object.keys(CONTI).indexOf(k) + 1), desc: CONTI[k].l, mastro: "C", mastroDesc: "Costi sostenuti (pagati)" }, s * ((Number(r.imponibile) || 0) + (Number(r.bollo) || 0)));
+        continue;
+      }
+      if (!TIPI_RICAVO.includes(r.tipo)) continue;
+      const corr = r.tipo === "corrispettivo";
+      for (const [id, q] of quoteAtt(r, atts)) {
+        const i = Math.max(0, atts.findIndex(x => x.id === id)), at = atts[i] || atts[0];
+        add(`R|${i}|${corr ? 2 : 1}`, { sez: "R", code: `R.${i + 1}.${corr ? 2 : 1}`, desc: (corr ? "Corrispettivi" : "Ricavi e compensi da fatture") + (atts.length > 1 ? ` · ${at.descrizione || at.ateco || "attività " + (i + 1)}` : ""),
+          mastro: "R", mastroDesc: "Ricavi e compensi incassati", coeff: Number(at.coefficiente) || 0 }, s * (Number(q) || 0));
+      }
+    }
+    const conti = [...acc.values()].map(e => ({ ...e, v: r2(e.v) })).filter(e => Math.abs(e.v) >= 0.005).sort((a, b) => (a.sez === b.sez ? a.code.localeCompare(b.code) : a.sez === "C" ? -1 : 1));
+    const C = r2(conti.filter(e => e.sez === "C").reduce((t, e) => t + e.v, 0)), R = r2(conti.filter(e => e.sez === "R").reduce((t, e) => t + e.v, 0));
+    const ricC = conti.filter(e => e.sez === "R" && e.coeff), pond = ricC.reduce((t, e) => t + e.v, 0);
+    const coeffPond = pond > 0 ? Math.round(ricC.reduce((t, e) => t + e.v * e.coeff, 0) / pond * 100) / 100 : null;
+    return {
+      fonte: "Contabilità forfettaria del gestionale", regime: "forf",
+      ragione: c.denominazione || "", piva: soloCifre(c.piva), cf: String(c.cf || "").toUpperCase(),
+      indirizzo: [c.sedeIndirizzo || c.resIndirizzo, [c.sedeCap || c.resCap, c.sedeComune || c.resComune].filter(Boolean).join(" ") + ((c.sedeProv || c.resProv) ? ` (${c.sedeProv || c.resProv})` : "")].map(s => String(s || "").trim()).filter(Boolean).join(", "),
+      dal: `01/01/${Y}`, al: ceDataIt(al), ultimaReg: ceDataIt(ultima), nReg: regs.length,
+      conti, totali: { C, R }, risultato: r2(R - C),
+      coeff: Number(c.coefficiente) || null, coeffPond: atts.length > 1 ? coeffPond : null, sost: Number(c.aliquota) || 15, prev: PREV_GEST[c.gestionePrev] || "", multiAtt: atts.length > 1, nonIncassato: r2(nonInc)
+    };
+  };
+
   /* Riepilogo: apertura diretta in Redditi PF del portale */
   const bp = document.getElementById("btn-pacchetto");
   if (bp) {

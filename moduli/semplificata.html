@@ -6749,6 +6749,63 @@ html.stampa-pdf .solo-stampa.st-attiva{display:block!important;position:absolute
   };
   window.portaleAggiorna = function () { if (!S.db) localRefresh(); };
 
+  /* Previsionale al 31/12: conto economico per conti fino a una data, letto dall'archivio dell'azienda */
+  const ceDataIt = d => /^\d{4}-\d{2}-\d{2}/.test(d || "") ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "";
+  window.portaleContoEconomico = async function (rif, opz) {
+    opz = opz || {};
+    if (!S.aziende || !S.aziende.length) return { errore: "archivio-vuoto" };
+    const cf = pulisci(rif.cf), pi = soloCifre(rif.piva || "");
+    const sempl = typeof SEMPL !== "undefined" && SEMPL;
+    const idRif = sempl ? rif.sempId : rif.ordId;
+    const a = S.aziende.find(x => idRif && x.id === idRif)
+      || S.aziende.find(x => (cf && pulisci(x.cf) === cf) || (pi && soloCifre(x.piva) === pi) || (cf && /^\d{11}$/.test(cf) && soloCifre(x.piva) === cf));
+    if (!a) return { errore: "non-presente" };
+    const anno = Number(opz.anno) || S.anno;
+    // l'azienda si seleziona anche qui, così il piano dei conti comprende le sue modifiche
+    window.portaleSeleziona(rif);
+    let regs = [];
+    if (S.db) {
+      const leggi = async q => { const s = await q.get(); return s.docs.map(d => ({ id: d.id, ...d.data() })); };
+      const base = () => S.db.collection("registrazioni").where("aziendaId", "==", a.id).where("anno", "==", anno);
+      for (let t = 1; t <= 4; t++) {
+        const parte = await leggi(base().where("trim", "==", t).limit(1000));
+        if (parte.length >= 1000) { for (let m = t * 3 - 2; m <= t * 3; m++) regs.push(...await leggi(base().where("mese", "==", m).limit(1000))); }
+        else regs.push(...parte);
+      }
+      regs = [...new Map(regs.map(r => [r.id, r])).values()];
+      for (let i = 0; i < 30 && S.aziendaId !== a.id; i++) await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 500));
+    } else regs = lsLoad().registrazioni.filter(x => x.aziendaId === a.id && x.anno === anno);
+    const ultima = regs.reduce((m, r) => (r.causale !== "CHI" && String(r.dataReg || "") > m ? String(r.dataReg) : m), "");
+    const al = /^\d{4}-\d{2}-\d{2}$/.test(opz.al || "") ? opz.al : (ultima || `${anno}-12-31`);
+    const saldi = new Map();
+    for (const r of regs) {
+      if (!r.dataReg || r.dataReg > al || r.causale === "CHI") continue;   // la chiusura dei conti azzera il conto economico: si esclude
+      for (const x of r.righe || []) { const e = saldi.get(x.conto) || { d: 0, a: 0 }; e.d += Number(x.dare) || 0; e.a += Number(x.avere) || 0; saldi.set(x.conto, e); }
+    }
+    const conti = []; let C = 0, R = 0;
+    for (const [c, e] of saldi) {
+      const x = conto(c) || contiAzienda(a).get(c); if (!x) continue;
+      const s = r2(e.d - e.a); if (!s) continue;
+      const v = (s >= 0 ? x.vd : x.va) || x.vd || "", t = TIPO_VOCE(v);
+      if (t !== "R" && t !== "C") continue;
+      const imp = t === "C" ? s : -s, p = c.split(".");
+      const f = String(x.fis || "").toLowerCase(), dd = String(x.ded || "").trim(), dn = /^\d+$/.test(dd) ? Number(dd) : null;
+      const ind = /imposte sul reddito|sanzion/.test(f) ? 100 : (dn !== null && dn < 100 ? 100 - dn : 0);
+      const g = p.length > 2 ? p.slice(0, 2).join(".") : "";
+      conti.push({ sez: t, code: c, desc: x.d || c, v: imp, voce: v, mastro: p[0], mastroDesc: descConto(p[0]) || "", gruppo: g, gruppoDesc: g ? descConto(g) || "" : "", indPct: ind });
+      if (t === "C") C += imp; else R += imp;
+    }
+    conti.sort((x, y) => (x.sez === y.sez ? cmpCodici(x.code, y.code) : x.sez === "C" ? -1 : 1));
+    return {
+      fonte: sempl ? "Contabilità semplificata del gestionale" : "Contabilità ordinaria del gestionale", regime: sempl ? "semp" : "ord",
+      ragione: a.denominazione || "", piva: soloCifre(a.piva), cf: String(a.cf || "").toUpperCase(),
+      indirizzo: [a.sedeIndirizzo, [a.sedeCap, a.sedeComune].filter(Boolean).join(" ") + (a.sedeProv ? ` (${a.sedeProv})` : "")].map(s => String(s || "").trim()).filter(Boolean).join(", "),
+      dal: `01/01/${anno}`, al: ceDataIt(al), ultimaReg: ceDataIt(ultima), nReg: regs.length,
+      conti, totali: { C: r2(C), R: r2(R) }, risultato: r2(R - C)
+    };
+  };
+
   /* Dichiarazioni: passaggio diretto alle web app del portale, senza file */
   const NOMI = { sc: "Redditi SC", sp: "Redditi SP", pf: "Redditi PF", irap: "IRAP", iva: "IVA" };
   function aggiungiPulsanti() {

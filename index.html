@@ -8,7 +8,7 @@
   --bg:#edf1f0; --panel:#fbfcfc; --ink:#14232a; --muted:#596a70; --line:#d1dadb; --soft:#e2e9e8;
   --rail:#13232a; --rail-ink:#e4edef; --rail-muted:#8ea3a9; --rail-line:#263941; --rail-hi:#1d333c;
   --acc:#0f5e6e; --acc-soft:#dbeaed; --on-acc:#ffffff;
-  --ord:#1f5d80; --semp:#5b4a8b; --forf:#1d6a59; --pf:#0b5d7a; --sp:#8a1d55; --sc:#0f5e6e; --enc:#5b4a8b; --irap:#9a5d14; --iva:#2c6e49; --lipe:#a23b2a; --f24:#3a3a5c; --xbrl:#7a3e1c;
+  --ord:#1f5d80; --semp:#5b4a8b; --forf:#1d6a59; --pf:#0b5d7a; --sp:#8a1d55; --sc:#0f5e6e; --enc:#5b4a8b; --irap:#9a5d14; --iva:#2c6e49; --lipe:#a23b2a; --f24:#3a3a5c; --xbrl:#7a3e1c; --prev:#3b4f8f;
   --ok:#2c7a4b; --ok-soft:#dff0e6; --warn:#9a5d00; --warn-soft:#f8ecd6; --err:#b3261e; --err-soft:#f9e1df;
   --f-ui:"Archivo","Helvetica Neue",Arial,sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -17,13 +17,13 @@
   --bg:#0e171a; --panel:#152126; --ink:#e1eaec; --muted:#93a6ac; --line:#28393f; --soft:#1b2a30;
   --rail:#0a1215; --rail-ink:#e1eaec; --rail-muted:#7f949a; --rail-line:#1f3037; --rail-hi:#16262c;
   --acc:#6cc3d3; --acc-soft:#183a42; --on-acc:#08181c;
-  --ord:#6fb3da; --semp:#b3a2e8; --forf:#5dbea3; --pf:#5fb3d3; --sp:#e07aae; --sc:#6cc3d3; --enc:#c9b6f0; --irap:#e0a85a; --iva:#7cc59c; --lipe:#ec8f7e; --f24:#c8b46b; --xbrl:#e3a47c;
+  --ord:#6fb3da; --semp:#b3a2e8; --forf:#5dbea3; --pf:#5fb3d3; --sp:#e07aae; --sc:#6cc3d3; --enc:#c9b6f0; --irap:#e0a85a; --iva:#7cc59c; --lipe:#ec8f7e; --f24:#c8b46b; --xbrl:#e3a47c; --prev:#9fb1ea;
   --ok:#6cc893; --ok-soft:#173326; --warn:#f0b35a; --warn-soft:#352812; --err:#ff8a80; --err-soft:#3a1d1a; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0e171a; --panel:#152126; --ink:#e1eaec; --muted:#93a6ac; --line:#28393f; --soft:#1b2a30;
   --rail:#0a1215; --rail-ink:#e1eaec; --rail-muted:#7f949a; --rail-line:#1f3037; --rail-hi:#16262c;
   --acc:#6cc3d3; --acc-soft:#183a42; --on-acc:#08181c;
-  --ord:#6fb3da; --semp:#b3a2e8; --forf:#5dbea3; --pf:#5fb3d3; --sp:#e07aae; --sc:#6cc3d3; --enc:#c9b6f0; --irap:#e0a85a; --iva:#7cc59c; --lipe:#ec8f7e; --f24:#c8b46b; --xbrl:#e3a47c;
+  --ord:#6fb3da; --semp:#b3a2e8; --forf:#5dbea3; --pf:#5fb3d3; --sp:#e07aae; --sc:#6cc3d3; --enc:#c9b6f0; --irap:#e0a85a; --iva:#7cc59c; --lipe:#ec8f7e; --f24:#c8b46b; --xbrl:#e3a47c; --prev:#9fb1ea;
   --ok:#6cc893; --ok-soft:#173326; --warn:#f0b35a; --warn-soft:#352812; --err:#ff8a80; --err-soft:#3a1d1a; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -413,16 +413,17 @@ let st={mode:'',col:'orig',bg:'orig',size:'m'};
 try{Object.assign(st,JSON.parse(localStorage.getItem(KEY)||'{}'))}catch(e){}
 const saveSt=()=>{try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}};
 /* nomi delle variabili di colore usati da ciascuna app */
-const MAP={ord:['--accent','--accent-soft','--accent-ink'],semp:['--accent','--accent-soft','--accent-ink'],forf:['--accent','--accent-soft','--accent-ink'],lipe:['--acc','--acc-soft','--on-acc'],shell:['--acc','--acc-soft','--on-acc'],sc:['--acc','--acc-soft','--on-acc'],enc:['--acc','--acc-soft','--on-acc'],irap:['--acc','--acc-soft','--on-acc'],iva:['--acc','--acc-soft','--on-acc'],sp:['--plum','--plum-soft','--on-plum']};
+const MAP={prev:['--accent','--accent-soft','--accent-ink'],ord:['--accent','--accent-soft','--accent-ink'],semp:['--accent','--accent-soft','--accent-ink'],forf:['--accent','--accent-soft','--accent-ink'],lipe:['--acc','--acc-soft','--on-acc'],shell:['--acc','--acc-soft','--on-acc'],sc:['--acc','--acc-soft','--on-acc'],enc:['--acc','--acc-soft','--on-acc'],irap:['--acc','--acc-soft','--on-acc'],iva:['--acc','--acc-soft','--on-acc'],sp:['--plum','--plum-soft','--on-plum']};
 function varsFor(app,dark){
   let v='';const c=COL[st.col],b=BG[st.bg];
   if(c&&c.L){const C=dark?c.D:c.L,m=MAP[app];v+=`${m[0]}:${C[0]};${m[1]}:${C[1]};${m[2]}:${C[2]};`;}
-  if(b&&b.L){const B=dark?b.D:b.L;const pn=(app==='ord'||app==='semp'||app==='forf')?'--surface':'--panel';v+=`--bg:${B[0]};${pn}:${B[1]};--line:${B[2]};--ink:${B[3]};--muted:${B[4]};`;if(app==='shell')v+=`--soft:${dark?B[2]:B[0]};`;}
+  if(b&&b.L){const B=dark?b.D:b.L;const pn=(app==='ord'||app==='semp'||app==='forf'||app==='prev')?'--surface':'--panel';v+=`--bg:${B[0]};${pn}:${B[1]};--line:${B[2]};--ink:${B[3]};--muted:${B[4]};`;if(app==='shell')v+=`--soft:${dark?B[2]:B[0]};`;}
   return v;
 }
 function cssFor(app){
   const l=varsFor(app,false),d=varsFor(app,true);if(!l)return '';
-  return `html:root{${l}}@media (prefers-color-scheme: dark){html:root:not([data-theme="light"]){${d}}}html:root[data-theme="dark"]{${d}}`;
+  const R=app==='prev'?'html:root:root':'html:root'; /* il Previsionale colora per regime: il colore scelto nel portale prevale */
+  return `${R}{${l}}@media (prefers-color-scheme: dark){${R}:not([data-theme="light"]){${d}}}${R}[data-theme="dark"]{${d}}`;
 }
 function applyDoc(doc,app){
   if(!doc||!doc.documentElement)return;
@@ -759,6 +760,7 @@ const MOD = [
   { id: 'semp', g: 'cont', code: 'CS', name: 'Contabilità Semplificata', tab: 'Semplificata', file: 'moduli/semplificata.html', desc: 'Reddito per cassa, registri IVA, quadro RG' },
   { id: 'forf', g: 'cont', code: 'CF', name: 'Contabilità Forfettaria', tab: 'Forfettaria', file: 'moduli/forfettaria.html', desc: 'Ricavi e costi dei forfettari, quadri LM e RS' },
   { id: 'xbrl', g: 'bil', code: 'XB', name: 'Bilancio XBRL', tab: 'Bilancio XBRL', file: 'moduli/bilancio-xbrl.html', desc: 'Bilancio abbreviato, nota integrativa e file per il deposito in CCIAA' },
+  { id: 'prev', g: 'bil', code: 'PV', name: 'Previsionale al 31/12', tab: 'Previsionale', file: 'moduli/previsionale.html', desc: 'Conto economico dal gestionale, da Profis o da Blustring proiettato al 31/12, con imposte e netto' },
   { id: 'pf', g: 'dic', anno: 2026, code: 'PF', name: 'Redditi PF 2026', tab: 'Redditi PF', file: 'moduli/2026/pf.html', input: '#jsonFile', desc: 'Persone fisiche' },
   { id: 'sp', g: 'dic', anno: 2026, code: 'SP', name: 'Redditi SP 2026', tab: 'Redditi SP', file: 'moduli/2026/sp.html', input: '#fileJson', desc: 'Società di persone' },
   { id: 'sc', g: 'dic', anno: 2026, code: 'SC', name: 'Redditi SC 2026', tab: 'Redditi SC', file: 'moduli/2026/sc.html', input: '#fileJson', desc: 'Società di capitali' },
@@ -864,6 +866,7 @@ function pronto(id, f) {
     const w = f.contentWindow, d = f.contentDocument;
     if (!d || d.URL !== 'about:srcdoc' || d.readyState === 'loading') return false;
     if (id === 'ord' || id === 'semp' || id === 'forf') return typeof w.portaleSeleziona === 'function';
+    if (id === 'prev') return typeof w.prevCliente === 'function';
     if (id === 'f24') return true;
     return typeof w.suiteF24Payload !== 'undefined';
   } catch (e) { return true; }
@@ -1173,6 +1176,7 @@ function renderAttivo() {
 }
 $('#attivo').addEventListener('click', () => { if (ATTIVO) apriScheda(ATTIVO); });
 async function applicaAttivo(id) {
+  if (id === 'prev') { const w = frames.prev && frames.prev.el.contentWindow; if (w && w.prevCliente && ATTIVO && applicato.prev !== ATTIVO) { applicato.prev = ATTIVO; try { w.prevCliente(ATTIVO); } catch (e) {} } return; }
   if (!(id === 'ord' || id === 'semp' || id === 'forf' || id === 'xbrl') || !ATTIVO || applicato[id] === ATTIVO) return;
   const c = CLIENTI.find(x => x.id === ATTIVO); if (!c) return;
   applicato[id] = ATTIVO;
@@ -1523,6 +1527,29 @@ function aggiorna() {
 window.addEventListener('storage', aggiorna);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) aggiorna(); });
 
+/* ======================= PREVISIONALE: CONTO ECONOMICO DAI MODULI DI CONTABILITÀ ======================= */
+const regimeDi = c => c.regime === 'forfettaria' ? 'forf' : c.regime === 'semplificata' ? 'semp' : c.regime === 'ordinaria' ? 'ord'
+  : c.forfId ? 'forf' : c.sempId ? 'semp' : c.ordId ? 'ord' : (c.tipo === 'PF' ? 'semp' : 'ord');
+async function contoEconomicoDa(regime, idCli, opz) {
+  const modId = regime === 'forf' ? 'forf' : regime === 'semp' ? 'semp' : 'ord', m = modDi(modId);
+  const c = CLIENTI.find(x => x.id === idCli);
+  if (!c) return { errore: 'Cliente non trovato nell’anagrafica dello Studio.' };
+  try { await ensureFrame(modId); } catch (e) { return { errore: `Impossibile aprire ${m.name}.` }; }
+  const w = frames[modId].el.contentWindow;
+  if (!w || typeof w.portaleContoEconomico !== 'function') return { errore: `${m.name} non è aggiornata: ricarica il portale.` };
+  const rif = { cf: c.cf, piva: c.piva, ordId: c.ordId, sempId: c.sempId, forfId: c.forfId };
+  let r = null;
+  // l'archivio delle aziende del modulo può impiegare qualche istante ad arrivare
+  for (let i = 0; i < 20; i++) {
+    try { r = await w.portaleContoEconomico(rif, opz || {}); } catch (e) { r = { errore: e && e.message ? e.message : String(e) }; }
+    if (!r || (r.errore !== 'archivio-vuoto' && r.errore !== 'non-presente')) break;
+    await new Promise(res => setTimeout(res, 300));
+  }
+  applicato[modId] = undefined;   // all'apertura del modulo si riseleziona il cliente attivo
+  if (r && (r.errore === 'archivio-vuoto' || r.errore === 'non-presente')) r = { errore: `${nomeCli(c)} non è in ${m.name}: attivalo dalla scheda del cliente o scegli un'altra contabilità.` };
+  return JSON.parse(JSON.stringify(r || { errore: 'Nessuna risposta dal modulo di contabilità.' }));
+}
+
 /* ======================= API PER I MODULI ======================= */
 window.PORTALE = {
   versione: '1.0',
@@ -1530,6 +1557,10 @@ window.PORTALE = {
   apriDichiarazione, apriLipe, apriF24,
   daModulo: (mod, rec) => { daModulo(mod, rec); },
   clienti: () => CLIENTI.slice(),
+  attivo: () => ATTIVO,
+  regimeCliente: id => { const c = CLIENTI.find(x => x.id === id); return c ? regimeDi(c) : ''; },
+  nomeCliente: id => nomeCli(CLIENTI.find(x => x.id === id)),
+  contoEconomico: (regime, idCli, opz) => contoEconomicoDa(regime, idCli, opz),
   toast,
   /* archivio: usato dal collegamento a Supabase della versione sul computer per caricare nel cloud i dati del browser */
   archivio: {
