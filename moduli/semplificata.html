@@ -567,6 +567,21 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
         <label class="fld" for="in-acconto">Acconto IVA versato a dicembre<input type="number" id="in-acconto" step="0.01" min="0" inputmode="decimal"></label>
         <label class="fld" for="in-metodo">Metodo dell'acconto<select id="in-metodo"><option value="">—</option><option value="1">1 · Storico</option><option value="2">2 · Previsionale</option><option value="3">3 · Analitico</option><option value="4">4 · Settori particolari</option></select></label>
       </div>
+      <div class="row" id="liq-pre-bar" hidden><span class="hint" id="liq-pre-testo"></span><span class="spacer"></span><button class="btn small pri" id="liq-pre-auto" type="button">Ricava dalle registrazioni importate</button></div>
+      <p class="hint" id="liq-pre-msg" role="status"></p>
+      <form id="liq-pre-form" class="card" hidden novalidate style="border-color:var(--accent);box-shadow:none">
+        <h3 id="liq-pre-t">Liquidazione del programma precedente</h3>
+        <p class="hint">Importi della liquidazione fatta nel programma precedente (righi del quadro VP). Riporti di debito e credito, interessi e importo da versare si calcolano come per gli altri periodi.</p>
+        <div class="formgrid">
+          <label class="fld" for="lp-vp2">VP2 · Operazioni attive<input id="lp-vp2" type="number" step="0.01" inputmode="decimal" class="mono"></label>
+          <label class="fld" for="lp-vp3">VP3 · Operazioni passive<input id="lp-vp3" type="number" step="0.01" inputmode="decimal" class="mono"></label>
+          <label class="fld" for="lp-vp4">VP4 · IVA esigibile<input id="lp-vp4" type="number" step="0.01" inputmode="decimal" class="mono"></label>
+          <label class="fld" for="lp-vp5">VP5 · IVA detratta<input id="lp-vp5" type="number" step="0.01" inputmode="decimal" class="mono"></label>
+          <label class="fld" for="lp-vp9">VP9 · Credito dell'anno precedente usato<input id="lp-vp9" type="number" step="0.01" min="0" inputmode="decimal" class="mono" placeholder="automatico"></label>
+        </div>
+        <div class="lm" id="lp-calc" style="margin-top:10px"></div>
+        <div class="row"><button class="btn pri" type="submit">Salva</button><button class="btn" type="button" id="lp-proponi">Proponi dalle registrazioni</button><button class="btn" type="button" id="lp-elimina">Togli gli importi</button><button class="btn" type="button" id="lp-annulla">Annulla</button><span class="hint" id="lp-msg" role="status"></span></div>
+      </form>
       <div class="tbl-wrap"><table>
         <thead><tr><th>Periodo</th><th class="num">VP2 Op. attive</th><th class="num">VP3 Op. passive</th><th class="num">VP4 IVA esigibile</th><th class="num">VP5 IVA detratta</th><th class="num">Riporti e crediti</th><th class="num">Interessi 1%</th><th class="num">VP14 Da versare</th><th class="num">VP14 A credito</th><th>Versamento</th></tr></thead>
         <tbody id="liq-body"></tbody>
@@ -2351,19 +2366,26 @@ function nomePeriodo(az, p) { return az?.periodicita === "T" ? `${p}° trimestre
 const ESCLUSI_VP2 = new Set(["N1", "N2.2", "N7"]);
 // soglia di versamento minimo: 25,82 € fino al 2023, 100 € dal 2024 (D.Lgs. 1/2024, art. 9)
 const sogliaIva = anno => anno >= 2024 ? 100 : 25.82;
+let LIQ_OVR = null;   // anteprima dell'inserimento di un periodo del programma precedente
 function liquidazioni() {
   const az = aziendaCorrente(); if (!az) return [];
-  const Y = String(S.anno), conf = (az.iva || {})[Y] || {};
-  let credAnnoRes = r2(conf.credPrec || 0), debRip = 0, credRip = 0, primo = true;
+  const Y = String(S.anno), conf = (az.iva || {})[Y] || {}, man = LIQ_OVR ? { ...(conf.liqPre || {}), [LIQ_OVR.p]: LIQ_OVR.M } : (conf.liqPre || {});
+  let credAnnoRes = r2(conf.credPrec || 0), debRip = 0, credRip = 0, primo = true, ultimoManuale = false;
   const rip = az.ripresa && az.ripresa.tipo === "corso" && az.ripresa.anno === S.anno ? az.ripresa : null;
   return periodi(az).map(p => {
+    let M = null;
     if (rip) {
       const mFine = az.periodicita === "T" ? p * 3 : p, fine = `${S.anno}-${String(mFine).padStart(2, "0")}-${String(new Date(S.anno, mFine, 0).getDate()).padStart(2, "0")}`;
-      if (fine <= rip.data) return { p, pre: true, vp2: 0, vp3: 0, vp4: 0, vp5: 0, vp6: 0, vp7: 0, vp8: 0, vp9: 0, vp12: 0, vp13: 0, vp14: 0, versare: 0, credito: 0, cod: "", scad: "", riporto: 0 };
-      if (primo) { credRip = r2(rip.credIva || 0); primo = false; }
+      if (fine <= rip.data) {
+        M = man[p] || null;
+        // periodo liquidato nel programma precedente e non inserito: non se ne conoscono gli importi
+        if (!M) { debRip = 0; credRip = 0; ultimoManuale = false; return { p, pre: true, vp2: 0, vp3: 0, vp4: 0, vp5: 0, vp6: 0, vp7: 0, vp8: 0, vp9: 0, vp12: 0, vp13: 0, vp14: 0, versare: 0, credito: 0, cod: "", scad: "", riporto: 0 }; }
+        ultimoManuale = true;
+      } else if (primo) { if (!ultimoManuale) { credRip = r2(rip.credIva || 0); debRip = 0; } primo = false; }
     }
     let vp2 = 0, vp3 = 0, vp4 = 0, vp5 = 0;
-    for (const r of S.regs) {
+    if (M) { vp2 = Number(M.vp2) || 0; vp3 = Number(M.vp3) || 0; vp4 = Number(M.vp4) || 0; vp5 = Number(M.vp5) || 0; }
+    else for (const r of S.regs) {
       if (periodoDi(az, r.dataReg) !== p) continue;
       for (const v of r.iva || []) {
         if (v.reg === "A") { vp3 += v.imp; vp5 += v.detr; }
@@ -2374,7 +2396,9 @@ function liquidazioni() {
     vp2 = r2(vp2); vp3 = r2(vp3); vp4 = r2(vp4); vp5 = r2(vp5);
     const vp6 = r2(vp4 - vp5), vp7 = debRip, vp8 = credRip;
     let dovuta = r2(vp6 + vp7 - vp8);
-    let vp9 = 0; if (dovuta > 0 && credAnnoRes > 0) { vp9 = Math.min(dovuta, credAnnoRes); credAnnoRes = r2(credAnnoRes - vp9); dovuta = r2(dovuta - vp9); }
+    let vp9 = 0;
+    if (M && M.vp9 != null && M.vp9 !== "") { vp9 = r2(Math.max(0, Math.min(Number(M.vp9) || 0, Math.max(dovuta, 0)))); credAnnoRes = r2(Math.max(0, credAnnoRes - vp9)); dovuta = r2(dovuta - vp9); }
+    else if (dovuta > 0 && credAnnoRes > 0) { vp9 = Math.min(dovuta, credAnnoRes); credAnnoRes = r2(credAnnoRes - vp9); dovuta = r2(dovuta - vp9); }
     const ultimo = p === periodi(az).length;
     const vp13 = ultimo ? r2(conf.acconto || 0) : 0, metodo = ultimo && vp13 ? String(conf.metodo || "") : "";
     const vp12 = az.periodicita === "T" && dovuta > 0 ? r2(dovuta * 0.01) : 0;
@@ -2390,8 +2414,37 @@ function liquidazioni() {
       else { cod = String(6000 + p); scad = p === 12 ? `16/01/${S.anno + 1}` : `${p === 7 ? "20" : "16"}/${String(p + 1).padStart(2, "0")}/${S.anno}`; }
     } else if (vp14 > 0) debRip = vp14;
     else if (vp14 < 0) { credito = -vp14; credRip = credito; }
-    return { p, vp2, vp3, vp4, vp5, vp6, vp7, vp8, vp9, vp12, vp13, metodo, vp14, versare, credito, cod, scad, riporto: debRip };
+    const o = { p, vp2, vp3, vp4, vp5, vp6, vp7, vp8, vp9, vp12, vp13, metodo, vp14, versare, credito, cod, scad, riporto: debRip };
+    if (M) Object.assign(o, { pre: true, manuale: true, fonte: M.fonte || "manuale", dovuta });
+    return o;
   });
+}
+/* azienda mensile, ma i giroconti di liquidazione importati sono solo a fine trimestre: periodicità da correggere */
+function liqPeriodicitaSospetta() {
+  const az = aziendaCorrente(); if (!az || az.periodicita === "T" || !az.ripresa) return false;
+  const mesi = new Set();
+  for (const r of S.regs) if (r.dataReg <= az.ripresa.data && (r.righe || []).some(x => x.conto === K.ivaLiq) && (r.righe || []).some(x => x.conto === K.ivaVen || x.conto === K.ivaAcq) && !(r.righe || []).some(x => x.conto === K.banca || x.conto === K.cassa)) mesi.add(Number(r.dataReg.slice(5, 7)));
+  return mesi.size >= 1 && [...mesi].every(m => m % 3 === 0);
+}
+/* periodi liquidati nel programma precedente: importi ricavati dalle registrazioni (giroconto di liquidazione o movimenti dei conti IVA) */
+function liqDaRegistrazioni(p) {
+  const az = aziendaCorrente(), IVA_V = new Set([K.ivaVen, K2.ivaCorr]), SPLIT = "35.01.49";
+  const regs = S.regs.filter(r => periodoDi(az, r.dataReg) === p);
+  const tocca = (r, set) => (r.righe || []).some(x => set.has(x.conto));
+  const sm = (r, set, segno) => (r.righe || []).reduce((t, x) => set.has(x.conto) ? t + segno * ((x.dare || 0) - (x.avere || 0)) : t, 0);
+  const isLiq = r => r.causale === "LIQ" || (tocca(r, new Set([K.ivaLiq])) && (tocca(r, IVA_V) || tocca(r, new Set([K.ivaAcq]))) && !tocca(r, new Set([K.banca, K.cassa])));
+  const liq = regs.filter(isLiq), altre = regs.filter(r => !isLiq(r));
+  let g4 = 0, g5 = 0, m4 = 0, m5 = 0, vp2 = 0, vp3 = 0, eraio = 0;
+  for (const r of liq) { g4 += sm(r, IVA_V, 1); g5 += sm(r, new Set([K.ivaAcq]), -1); eraio += sm(r, new Set([K.ivaLiq]), -1); }
+  const base = (r, segno) => (r.righe || []).reduce((t, x) => (/^35\.01\./.test(x.conto) || x.anagId || isPartitario(x.conto) || /^19\./.test(x.conto)) ? t : t + segno * ((x.avere || 0) - (x.dare || 0)), 0);
+  for (const r of altre) {
+    const v = tocca(r, IVA_V), a = tocca(r, new Set([K.ivaAcq])), sp = tocca(r, new Set([SPLIT]));
+    m4 += sm(r, IVA_V, -1); m5 += sm(r, new Set([K.ivaAcq]), 1);
+    if (a) vp3 += base(r, -1);                 // acquisti, compresi quelli in reverse charge (IVA anche nelle vendite)
+    else if (v || sp) vp2 += base(r, 1);
+  }
+  const daGiro = liq.length && (Math.abs(g4) >= 0.01 || Math.abs(g5) >= 0.01) && !liqPeriodicitaSospetta();
+  return { vp2: r2(vp2), vp3: r2(vp3), vp4: r2(daGiro ? g4 : m4), vp5: r2(daGiro ? g5 : m5), daGiro: !!daGiro, eraio: liq.length ? r2(eraio) : null, mov4: r2(m4), mov5: r2(m5) };
 }
 function renderIVA() {
   const az = aziendaCorrente(), avv = $("#iva-avviso");
@@ -2399,7 +2452,13 @@ function renderIVA() {
   avv.hidden = !!az.periodicita; avv.textContent = "Indica la periodicità delle liquidazioni IVA nella scheda Azienda: fino ad allora i periodi sono mensili.";
   const Y = String(S.anno), conf = (az.iva || {})[Y] || {};
   for (const [id, k] of [["#in-cred-prec", "credPrec"], ["#in-acconto", "acconto"], ["#in-metodo", "metodo"]]) if (document.activeElement !== $(id)) $(id).value = conf[k] || "";
-  $("#liq-body").innerHTML = liquidazioni().map(l => l.pre ? `<tr class="pre"><td>${nomePeriodo(az, l.p)}</td><td colspan="9">Liquidato nel programma precedente (ripresa saldi al ${itDate(az.ripresa.data)})</td></tr>` : `<tr><td>${nomePeriodo(az, l.p)}</td><td class="num">${num(l.vp2)}</td><td class="num">${num(l.vp3)}</td><td class="num">${num(l.vp4)}</td><td class="num">${num(l.vp5)}</td>
+  const liqAll = liquidazioni(), nPre = liqAll.filter(l => l.pre && !l.manuale).length, nMan = liqAll.filter(l => l.manuale).length;
+  $("#liq-pre-bar").hidden = !nPre && !nMan;
+  $("#liq-pre-auto").textContent = nMan && !nPre ? "Ricalcola dalle registrazioni" : "Ricava dalle registrazioni importate";
+  const sosp = (nPre || nMan) && liqPeriodicitaSospetta();
+  $("#liq-pre-auto").disabled = !!sosp;
+  $("#liq-pre-testo").innerHTML = sosp ? `<span class="err">Le liquidazioni importate sono trimestrali, ma l'azienda è ${az.periodicita ? "mensile" : "senza periodicità indicata"}: imposta la periodicità trimestrale nella scheda Azienda e torna qui.</span>` : esc(nPre ? `${nPre} ${nPre === 1 ? "periodo liquidato" : "periodi liquidati"} nel programma precedente senza importi: ricavali dal giroconto di liquidazione importato oppure inseriscili a mano.` : `Periodi liquidati nel programma precedente: importi inseriti (${nMan}). Il riporto di debito o credito prosegue nei periodi successivi.`);
+  $("#liq-body").innerHTML = liqAll.map(l => l.pre && !l.manuale ? `<tr class="pre"><td>${nomePeriodo(az, l.p)}</td><td colspan="8">Liquidato nel programma precedente (ripresa saldi al ${itDate(az.ripresa.data)})</td><td><button type="button" class="btn small" data-liq-pre="${l.p}">Inserisci gli importi</button></td></tr>` : `<tr${l.manuale ? ' class="liq-man"' : ""}><td>${nomePeriodo(az, l.p)}${l.manuale ? `<div class="sub"><span class="pill src">${l.fonte === "registrazioni" ? "dalle registrazioni" : "inserita"}</span></div>${(() => { const c = liqDaRegistrazioni(l.p); return c.eraio == null ? "" : `<div class="sub">${Math.abs(c.eraio - l.dovuta) < 0.01 ? `<span class="ok">in contabilità ${num(c.eraio)} ✓</span>` : `<span class="err">in contabilità ${num(c.eraio)}</span>`}</div>`; })()}<button type="button" class="btn small" data-liq-pre="${l.p}" style="margin-top:4px">Modifica</button>` : ""}</td><td class="num">${num(l.vp2)}</td><td class="num">${num(l.vp3)}</td><td class="num">${num(l.vp4)}</td><td class="num">${num(l.vp5)}</td>
     <td class="num">${[l.vp7 ? `+${num(l.vp7)} debito prec.` : "", l.vp8 ? `−${num(l.vp8)} credito prec.` : "", l.vp9 ? `−${num(l.vp9)} credito anno prec.` : "", l.vp13 ? `−${num(l.vp13)} acconto` : ""].filter(Boolean).join("<br>") || "–"}</td>
     <td class="num">${l.vp12 ? num(l.vp12) : "–"}</td><td class="num">${l.versare ? num(l.versare) : "–"}</td><td class="num">${l.credito ? num(l.credito) : "–"}</td>
     <td>${l.versare ? `<span class="mono">${l.cod}</span> entro il ${l.scad}` : l.riporto ? `Riportato (≤ ${num(sogliaIva(S.anno))} €)` : "–"}</td></tr>`).join("");
@@ -3597,7 +3656,7 @@ function moduliLipe(q) {
   const mod = [], pre = [];
   for (const p of per) {
     const l = liq.find(x => x.p === p); if (!l) continue;
-    if (l.pre) { pre.push(p); continue; }
+    if (l.pre && !l.manuale) { pre.push(p); continue; }
     const m = { p, nome: nomePeriodo(az, p), T };
     m.mese = T ? null : p;
     m.trimestre = T ? (p === 4 ? 5 : p) : null;      // IV trimestre dei trimestrali per opzione: codice 5
@@ -4435,7 +4494,9 @@ function vociF24() {
   const add = (v) => { v.scad = lavorativo(v.scad); V.push(v); };
   /* IVA periodica */
   for (const l of liquidazioni()) {
-    if (l.pre || !(l.versare > 0)) continue;
+    if (!(l.versare > 0)) continue;
+    // periodi del programma precedente: in elenco solo se scadono dopo la data dell'importazione (prima sono già versati lì)
+    if (l.pre && !(l.manuale && az.ripresa && dmy2iso(l.scad) > az.ripresa.data)) continue;
     add({ key: `IVA|${l.p}`, sez: "erario", cod: l.cod, rat: "", anno: String(Y), imp: r2(l.versare), conto: K2.liqIva, scad: dmy2iso(l.scad), desc: `IVA ${nomePeriodo(az, l.p).toLowerCase()} ${Y}`, ivaP: l.p });
   }
   const conf = (az.iva || {})[String(Y)] || {};
@@ -5848,6 +5909,71 @@ let tIva;
     await store.put("aziende", { ...az, iva }).catch(() => log("IVA", "Dati non salvati", "err"));
   }, 700);
 }));
+/* liquidazioni del programma precedente */
+let LP = null;
+const lpVal = id => { const v = $(id).value.trim(); return v === "" ? null : r2(Number(v)); };
+const lpDati = () => ({ vp2: lpVal("#lp-vp2") || 0, vp3: lpVal("#lp-vp3") || 0, vp4: lpVal("#lp-vp4") || 0, vp5: lpVal("#lp-vp5") || 0, vp9: lpVal("#lp-vp9"), fonte: LP?.fonte || "manuale" });
+async function lpSalvaTutti(mod) {
+  const az = aziendaCorrente(), Y = String(S.anno), conf = (az.iva || {})[Y] || {}, liqPre = { ...(conf.liqPre || {}) };
+  for (const [p, M] of Object.entries(mod)) { if (M) liqPre[p] = M; else delete liqPre[p]; }
+  await salvaAzienda({ iva: { ...(az.iva || {}), [Y]: { ...conf, liqPre } } });
+}
+function lpAnteprima() {
+  if (!LP) return;
+  const az = aziendaCorrente(); LIQ_OVR = { p: LP.p, M: lpDati() };
+  let l; try { l = liquidazioni().find(x => x.p === LP.p); } finally { LIQ_OVR = null; }
+  const c = liqDaRegistrazioni(LP.p), r = [];
+  r.push(`<div><span>VP6 · IVA dovuta o a credito del periodo</span><span class="mono">${num(l.vp6)}</span></div>`);
+  if (l.vp7 || l.vp8) r.push(`<div><span>${l.vp7 ? "VP7 · Debito del periodo precedente" : "VP8 · Credito del periodo precedente"}</span><span class="mono">${num(l.vp7 || l.vp8)}</span></div>`);
+  if (l.vp9) r.push(`<div><span>VP9 · Credito dell'anno precedente</span><span class="mono">${num(l.vp9)}</span></div>`);
+  if (l.vp12) r.push(`<div><span>Interessi trimestrali 1%</span><span class="mono">${num(l.vp12)}</span></div>`);
+  r.push(`<div><span><strong>VP14 · ${l.vp14 >= 0 ? "Da versare" : "A credito"}</strong></span><span class="mono"><strong>${num(Math.abs(l.vp14))}</strong>${l.versare ? ` · codice ${l.cod} entro il ${l.scad}` : l.riporto ? " · riportato al periodo successivo" : ""}</span></div>`);
+  if (c.eraio != null) r.push(`<div><span>Erario c/IVA nel giroconto di liquidazione importato</span><span class="mono">${num(c.eraio)} ${Math.abs(c.eraio - l.dovuta) < 0.01 ? `<span class="ok">coincide</span>` : `<span class="err">differenza ${num(r2(l.dovuta - c.eraio))}</span>`}</span></div>`);
+  $("#lp-calc").innerHTML = r.join("");
+}
+function lpApri(p) {
+  const az = aziendaCorrente(); if (!az) return;
+  const M = (((az.iva || {})[String(S.anno)] || {}).liqPre || {})[p];
+  LP = { p, fonte: M?.fonte || "manuale" };
+  $("#liq-pre-t").textContent = `${nomePeriodo(az, p)} ${S.anno} · liquidazione del programma precedente`;
+  const D = M || liqDaRegistrazioni(p);
+  if (!M) LP.fonte = "registrazioni";
+  for (const k of ["vp2", "vp3", "vp4", "vp5"]) $("#lp-" + k).value = D[k] ? D[k] : "";
+  $("#lp-vp9").value = M && M.vp9 != null ? M.vp9 : "";
+  $("#lp-elimina").hidden = !M; $("#lp-msg").textContent = M ? "" : "Importi proposti dalle registrazioni importate: verificali e salva.";
+  const f = $("#liq-pre-form"); f.hidden = false; lpAnteprima(); f.scrollIntoView({ block: "nearest" }); $("#lp-vp2").focus();
+}
+$("#liq-body").addEventListener("click", e => { const b = e.target.closest("[data-liq-pre]"); if (b) lpApri(Number(b.dataset.liqPre)); });
+["#lp-vp2", "#lp-vp3", "#lp-vp4", "#lp-vp5", "#lp-vp9"].forEach(id => $(id).addEventListener("input", () => { if (LP) LP.fonte = "manuale"; lpAnteprima(); }));
+$("#lp-annulla").addEventListener("click", () => { $("#liq-pre-form").hidden = true; LP = null; });
+$("#lp-proponi").addEventListener("click", () => { if (!LP) return; const D = liqDaRegistrazioni(LP.p); for (const k of ["vp2", "vp3", "vp4", "vp5"]) $("#lp-" + k).value = D[k] ? D[k] : ""; LP.fonte = "registrazioni"; lpAnteprima(); $("#lp-msg").textContent = D.daGiro ? "IVA esigibile e detratta dal giroconto di liquidazione; operazioni attive e passive stimate dalle registrazioni: verificale." : "Importi ricavati dai movimenti dei conti IVA del periodo: verificali."; });
+$("#lp-elimina").addEventListener("click", async () => { if (!LP) return; try { await lpSalvaTutti({ [LP.p]: null }); $("#liq-pre-form").hidden = true; LP = null; renderIVA(); } catch { $("#lp-msg").textContent = "Salvataggio non riuscito."; } });
+$("#liq-pre-form").addEventListener("submit", async e => {
+  e.preventDefault(); if (!LP) return;
+  const M = lpDati();
+  if (!M.vp4 && !M.vp5 && !M.vp2 && !M.vp3) return $("#lp-msg").textContent = "Inserisci almeno l'IVA esigibile o detratta.";
+  try { await lpSalvaTutti({ [LP.p]: M }); const az = aziendaCorrente(); log("IVA", `Liquidazione ${nomePeriodo(az, LP.p).toLowerCase()} del programma precedente salvata`, "ok"); $("#liq-pre-form").hidden = true; LP = null; renderIVA(); }
+  catch { $("#lp-msg").textContent = "Salvataggio non riuscito: riprova."; }
+});
+$("#liq-pre-auto").addEventListener("click", async () => {
+  const az = aziendaCorrente(); if (!az) return;
+  const man = ((az.iva || {})[String(S.anno)] || {}).liqPre || {}, mod = {}; let n = 0, vuoti = 0;
+  for (const l of liquidazioni()) {
+    if (!l.pre || (man[l.p] && man[l.p].fonte === "manuale")) continue;    // gli importi inseriti a mano non si toccano
+    const D = liqDaRegistrazioni(l.p);
+    if (!D.vp4 && !D.vp5) { vuoti++; continue; }
+    mod[l.p] = { vp2: D.vp2, vp3: D.vp3, vp4: D.vp4, vp5: D.vp5, vp9: man[l.p]?.vp9 ?? null, fonte: "registrazioni" }; n++;
+  }
+  const b = $("#liq-pre-auto"); b.disabled = true;
+  try {
+    if (n) await lpSalvaTutti(mod);
+    renderIVA();
+    const err = liquidazioni().filter(l => l.manuale).map(l => ({ l, c: liqDaRegistrazioni(l.p) })).filter(x => x.c.eraio != null && Math.abs(x.c.eraio - x.l.dovuta) >= 0.01);
+    const t = n ? `${n} ${n === 1 ? "liquidazione ricavata" : "liquidazioni ricavate"} dalle registrazioni importate${vuoti ? `; ${vuoti} ${vuoti === 1 ? "periodo" : "periodi"} senza movimenti IVA` : ""}${err.length ? `; ${err.length} da verificare: importo diverso dal giroconto di liquidazione` : "; IVA dovuta uguale al giroconto di liquidazione"}. Operazioni attive e passive (VP2 e VP3) sono stimate dalle registrazioni: controllale con Modifica.` : "Nessun movimento IVA nei periodi del programma precedente: inserisci gli importi a mano.";
+    $("#liq-pre-msg").textContent = t; log("IVA", t, n && !err.length ? "ok" : "err");
+  } catch { log("IVA", "Liquidazioni non salvate", "err"); }
+  finally { b.disabled = false; }
+});
 ["#bil-al", "#bil-livello"].forEach(s => $(s).addEventListener("change", renderBil));
 $("#bil-body").addEventListener("click", e => { const tr = e.target.closest("tr[data-conto-row]"); if (tr && $("#bil-livello").value === "0") mastrino(tr.dataset.contoRow); });
 
