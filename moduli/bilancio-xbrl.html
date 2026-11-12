@@ -761,7 +761,7 @@ function pulisciHtml(html) {
     }
   };
   giro(root);
-  let h = root.innerHTML.replace(/ /g, " ").replace(/\s+/g, " ").replace(/<div>\s*<\/div>/g, "").trim();
+  let h = root.innerHTML.replace(/&nbsp;|\u00a0/g, " ").replace(/\s+/g, " ").replace(/<div>\s*<\/div>/g, "").trim();
   if (/^<div>[\s\S]*<\/div>$/.test(h) && (h.match(/<div>/g) || []).length === 1) h = h.slice(5, -6).trim();
   return h;
 }
@@ -824,11 +824,22 @@ function numXbrl(t, v) {
   if (t === "percent") { const s = String(Math.round(n * 10000) / 10000); const dec = (s.split(".")[1] || "").length; return { s, d: String(Math.max(2, dec)) }; }
   const s = String(Math.round(n * 100) / 100); return { s, d: s.includes(".") ? "2" : "0" };
 }
+/* testi della nota integrativa: TEBENI legge il contenuto dei textBlock come XHTML, quindi niente entità HTML (&nbsp;) né tag lasciati aperti (<br>) */
+function xhtmlTb(html) {
+  const d = new DOMParser().parseFromString(`<body>${html || ""}</body>`, "text/html"), ser = new XMLSerializer();
+  const sig = el => [...el.childNodes].filter(c => !(c.nodeType === 3 && !c.data.trim()));
+  let box = d.body; /* il contenitore <div> aggiunto all'esportazione non si moltiplica a ogni riapertura del file */
+  while (sig(box).length === 1 && sig(box)[0].nodeName === "DIV" && !sig(box)[0].attributes.length) box = sig(box)[0];
+  const corpo = [...box.childNodes].map(n => ser.serializeToString(n)).join("")
+    .replace(/ xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"/g, "").replace(/\u00a0/g, " ")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "");
+  return "<div>" + corpo + "</div>";
+}
 function factXml(n, c, v, ind = "\t") {
   const t = E[n].t, cr = `c${c[0]}_${c[1]}`;
   if (NUMERICI.has(t)) { const { s, d } = numXbrl(t, v); return `${ind}<itcc-ci:${n} contextRef="${cr}" unitRef="${unitaDi(t)}" decimals="${d}">${s}</itcc-ci:${n}>`; }
   if (t === "boolean") return `${ind}<itcc-ci:${n} contextRef="${cr}">${v ? "true" : "false"}</itcc-ci:${n}>`;
-  if (t === "textBlock") return `${ind}<itcc-ci:${n} contextRef="${cr}">${xesc("<div>" + v + "</div>")}</itcc-ci:${n}>`;
+  if (t === "textBlock") return `${ind}<itcc-ci:${n} contextRef="${cr}">${xesc(xhtmlTb(v))}</itcc-ci:${n}>`;
   return `${ind}<itcc-ci:${n} contextRef="${cr}">${xesc(v)}</itcc-ci:${n}>`;
 }
 function scriviXbrl(doc) {
