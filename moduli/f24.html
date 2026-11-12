@@ -1745,5 +1745,171 @@ document.addEventListener('input',e=>{const t=e.target;if(!t||!t.dataset)return;
 const _bindStatic=bindStatic;bindStatic=function(){const r=_bindStatic.apply(this,arguments);try{if(state.contrib.cf)compilaNascita('c',state.contrib.cf,false)}catch(e){}return r};
 try{if(state.contrib.cf)compilaNascita('c',state.contrib.cf,false);if(intm&&intm.cf)compilaNascita('i',intm.cf,false)}catch(e){}
 </script>
+<script>/* ═══════════════ AVVISI BONARI: codici tributo e ravvedimento delle rate ═══════════════
+   Comunicazioni di irregolarità (controllo automatizzato artt. 36-bis DPR 600/73 e 54-bis DPR 633/72,
+   controllo formale art. 36-ter DPR 600/73, liquidazione dei redditi a tassazione separata).
+   Codici: guida AdE "Comunicazioni sui controlli delle dichiarazioni" (gennaio 2025); Ris. 289/E/2008; Ris. 132/E/2011. */
+(function(){
+'use strict';
+if(window.__avvisiBonari) return; window.__avvisiBonari=1;
+if(typeof RAVV_TRIB==='undefined'||typeof COD_ERARIO==='undefined') return;
+const CODICI=[
+ ['9001','Avviso bonario – somme dovute a seguito di controllo automatizzato (artt. 36-bis DPR 600/73 e 54-bis DPR 633/72)'],
+ ['9002','Avviso bonario – interessi sul pagamento rateale delle somme di cui al codice 9001'],
+ ['9006','Avviso bonario – somme dovute a seguito di controllo formale (art. 36-ter DPR 600/73)'],
+ ['9007','Avviso bonario – interessi sul pagamento rateale delle somme di cui al codice 9006'],
+ ['9526','Tassazione separata – somme dovute su TFR e prestazioni in forma di capitale (art. 36-bis)'],
+ ['9003','Tassazione separata – interessi sul pagamento rateale delle somme di cui al codice 9526'],
+ ['9527','Tassazione separata – recupero IRPEF su arretrati e simili (art. 36-bis)'],
+ ['9004','Tassazione separata – interessi sul pagamento rateale delle somme di cui al codice 9527'],
+ ['8929','Ravvedimento su importi rateizzati – controlli automatizzati (36-bis/54-bis) – SANZIONE'],
+ ['1980','Ravvedimento su importi rateizzati – controlli automatizzati (36-bis/54-bis) – INTERESSI'],
+ ['8933','Ravvedimento su importi rateizzati – controlli formali (36-ter) – SANZIONE'],
+ ['1983','Ravvedimento su importi rateizzati – controlli formali (36-ter) – INTERESSI'],
+ ['8931','Ravvedimento su importi rateizzati – tassazione separata TFR e prestazioni in capitale – SANZIONE'],
+ ['1981','Ravvedimento su importi rateizzati – tassazione separata TFR e prestazioni in capitale – INTERESSI'],
+ ['8932','Ravvedimento su importi rateizzati – tassazione separata arretrati e simili – SANZIONE'],
+ ['1982','Ravvedimento su importi rateizzati – tassazione separata arretrati e simili – INTERESSI'],
+];
+const AB_SET=new Set(CODICI.map(c=>c[0]));
+CODICI.forEach(c=>{ if(!COD_ERARIO.some(x=>x[0]===c[0])) COD_ERARIO.push(c); try{ MAPS.ERARIO[c[0]]=c[1]; ALLCOD[c[0]]=c[1]; }catch(e){} });
+const dl=document.getElementById('dl-erario');
+if(dl) dl.insertAdjacentHTML('beforeend',CODICI.map(([c,d])=>`<option value="${c}">${c} — ${esc(d)}</option>`).join(''));
+
+/* tipologie di comunicazione: capitale, interessi di rateazione, sanzione e interessi del ravvedimento */
+Object.assign(RAVV_TRIB,{
+ ab36bis:{label:'Controllo automatizzato (36-bis / 54-bis) – rata 9001',sez:'erario',cod:['9001'],intRat:'9002',int:'1980',sanz:'8929',ab:1,tipo:'controllo automatizzato'},
+ ab36ter:{label:'Controllo formale (36-ter) – rata 9006',sez:'erario',cod:['9006'],intRat:'9007',int:'1983',sanz:'8933',ab:1,tipo:'controllo formale'},
+ abtfr:{label:'Tassazione separata TFR e prestazioni in capitale – rata 9526',sez:'erario',cod:['9526'],intRat:'9003',int:'1981',sanz:'8931',ab:1,tipo:'tassazione separata',ts:1},
+ abarr:{label:'Tassazione separata arretrati – rata 9527',sez:'erario',cod:['9527'],intRat:'9004',int:'1982',sanz:'8932',ab:1,tipo:'tassazione separata',ts:1},
+});
+FASCE.none={lbl:'Rata versata nei termini – nessuna sanzione',norma:'art. 3-bis D.Lgs. 462/1997'};
+if(typeof ravvKey==='function'){ const _rk=ravvKey; ravvKey=function(r){ const k=_rk(r); return k&&RAVV_TRIB[k]&&RAVV_TRIB[k].ab?null:k; }; }
+
+/* ---------- interfaccia nella scheda Ravvedimento ---------- */
+const grid=document.querySelector('#page-ravv .rv-grid'); if(!grid) return;
+grid.insertAdjacentHTML('afterend',`
+ <div id="rv-ab" style="display:none;margin-top:14px;border:1px solid var(--rule);padding:12px 14px;background:rgba(0,0,0,.02)">
+  <div class="field-lbl" style="margin-bottom:8px;font-weight:700">Dati della comunicazione di irregolarità e della rata</div>
+  <div class="rv-grid">
+   <div><label class="field-lbl" for="rv-atto">Codice atto <span class="req">*</span></label><input id="rv-atto" maxlength="11" inputmode="numeric" placeholder="11 cifre, dalla comunicazione"></div>
+   <div><label class="field-lbl" for="rv-nr">Rata n.</label><input id="rv-nr" maxlength="2" inputmode="numeric" placeholder="es. 3"></div>
+   <div><label class="field-lbl" for="rv-tr">Numero totale delle rate</label><input id="rv-tr" maxlength="2" inputmode="numeric" placeholder="1 se unica soluzione"></div>
+   <div><label class="field-lbl" for="rv-next">Scadenza della rata successiva</label><input id="rv-next" type="date"></div>
+   <div><label class="field-lbl" for="rv-cap">Importo della rata – capitale <span class="req">*</span></label><div class="amt-wrap"><span class="euro" style="color:var(--red)">€</span><input id="rv-cap" placeholder="0,00"></div></div>
+   <div><label class="field-lbl" for="rv-irat">Interessi di rateazione della rata</label><div class="amt-wrap"><span class="euro" style="color:var(--red)">€</span><input id="rv-irat" placeholder="0,00"></div></div>
+   <div><label class="field-lbl" for="rv-elab">Data di elaborazione della comunicazione</label><input id="rv-elab" type="date"></div>
+   <div style="align-self:end"><button type="button" class="btn" id="rv-irat-calc" title="3,5% annuo dal primo giorno del secondo mese successivo all’elaborazione fino alla scadenza della rata">CALCOLA INTERESSI 3,5%</button></div>
+  </div>
+  <p class="print-note" style="margin:10px 0 0">Riporta i dati dal piano di rateazione allegato alla comunicazione. Se la rata è versata entro la scadenza vengono inserite solo le righe del capitale e degli interessi di rateazione; se è tardiva si aggiungono sanzione e interessi del ravvedimento, calcolati sulla quota d’imposta della rata (Ris. 132/E/2011). Il codice atto viene riportato nel campo della sezione Erario.</p>
+ </div>`);
+const box=document.querySelector('#page-ravv .summ-box.norm');
+if(box) box.insertAdjacentHTML('afterend',`<div class="summ-box norm" id="rv-ab-norme">
+  <div class="summ-lbl">Avvisi bonari – codici tributo e regole (guida AdE “Comunicazioni sui controlli delle dichiarazioni”, gennaio 2025)</div>
+  <table class="tbl"><thead><tr><th>Comunicazione</th><th>Capitale</th><th>Interessi rateazione</th><th>Sanzione ravv.</th><th>Interessi ravv.</th></tr></thead><tbody>
+   <tr><td>Controllo automatizzato (36-bis / 54-bis)</td><td>9001</td><td>9002</td><td>8929</td><td>1980</td></tr>
+   <tr><td>Controllo formale (36-ter)</td><td>9006</td><td>9007</td><td>8933</td><td>1983</td></tr>
+   <tr><td>Tassazione separata – TFR e prestazioni in capitale</td><td>9526</td><td>9003</td><td>8931</td><td>1981</td></tr>
+   <tr><td>Tassazione separata – arretrati e simili</td><td>9527</td><td>9004</td><td>8932</td><td>1982</td></tr></tbody></table>
+  <p><strong>Compilazione F24</strong> (sezione Erario, colonna degli importi a debito): codice atto e anno di riferimento (AAAA) come indicati nella comunicazione; per capitale e interessi di rateazione il campo rateazione nel formato NNRR (rata in pagamento e numero totale, es. 0308).</p>
+  <p><strong>Termini</strong> (comunicazioni elaborate dal 1° gennaio 2025): 60 giorni dal ricevimento per controllo automatizzato e formale (90 se trasmessa all’intermediario), 30 giorni per la tassazione separata; termine sospeso dal 1° agosto al 4 settembre. Sanzione ridotta: 8,33% controllo automatizzato (1/3 del 25%), 16,67% controllo formale (2/3 del 25%); 10% e 20% per le violazioni fino al 31/08/2024.</p>
+  <p><strong>Rateazione</strong> (art. 3-bis D.Lgs. 462/1997): fino a 20 rate trimestrali di pari importo; rate successive alla prima entro l’ultimo giorno di ciascun trimestre, con interessi del 3,5% annuo dal primo giorno del secondo mese successivo all’elaborazione. <strong>Lieve inadempimento</strong> (art. 15-ter DPR 602/1973): ritardo della prima rata fino a 7 giorni, carenza fino al 3% e comunque 10.000 euro. <strong>Decadenza</strong>: prima rata oltre 7 giorni, rata non pagata entro la scadenza della successiva, ultima rata oltre 90 giorni. Il ravvedimento della rata va eseguito entro questi termini.</p>
+ </div>`);
+const impInp=document.getElementById('rv-imp'), impLbl=impInp&&impInp.closest('.amt-wrap')?impInp.closest('.amt-wrap').previousElementSibling:null;
+const scadLbl=document.getElementById('rv-scad')?document.getElementById('rv-scad').previousElementSibling:null;
+const LBL0={imp:impLbl?impLbl.innerHTML:'',scad:scadLbl?scadLbl.innerHTML:''};
+const cfgNow=()=>RAVV_TRIB[$('#rv-trib').value]||{};
+const ni=id=>{ const v=String(($('#'+id)||{}).value||'').trim(); return /^\d{1,2}$/.test(v)?+v:0; };
+function abToggle(){
+  const ab=!!cfgNow().ab;
+  $('#rv-ab').style.display=ab?'':'none';
+  const rw=document.getElementById('rv-rat-wrap'); if(rw&&ab) rw.style.display='none';
+  if(impLbl) impLbl.innerHTML=ab?'Quota d’imposta della rata <span class="req">*</span>':LBL0.imp;
+  if(scadLbl) scadLbl.innerHTML=ab?'Scadenza della rata <span class="req">*</span>':LBL0.scad;
+}
+function rebuildSelect(){
+  const sel=$('#rv-trib'), cur=sel.value;
+  const groups={erario:'Sezione Erario',regioni:'Sezione Regioni',imu:'Sezione IMU e altri tributi locali'};
+  const opt=([k,v])=>`<option value="${k}">${v.label}</option>`;
+  sel.innerHTML=Object.entries(groups).map(([s,l])=>`<optgroup label="${l}">${Object.entries(RAVV_TRIB).filter(([,v])=>v.sez===s&&!v.ab).map(opt).join('')}</optgroup>`).join('')+
+    `<optgroup label="Avvisi bonari – comunicazioni di irregolarità">${Object.entries(RAVV_TRIB).filter(([,v])=>v.ab).map(opt).join('')}</optgroup>`;
+  if(RAVV_TRIB[cur]) sel.value=cur;
+}
+const _tc=rvTribChange; rvTribChange=function(){ _tc.apply(this,arguments); abToggle(); };
+
+/* calcolo: rata nei termini, lieve inadempimento, decadenza, ravvedimento sulla quota d'imposta */
+const _calc=rvCalc;
+rvCalc=function(){
+  const cfg=cfgNow(); if(!cfg.ab) return _calc.apply(this,arguments);
+  const cap=r2(parseAmt($('#rv-cap').value)), irat=r2(parseAmt($('#rv-irat').value));
+  const scad=$('#rv-scad').value, vers=$('#rv-vers').value, nr=ni('rv-nr'), tr=ni('rv-tr'), next=$('#rv-next').value;
+  if(!cap) return {err:'Inserire l’importo della rata (capitale) indicato nel piano di rateazione.'};
+  if(nr&&tr&&nr>tr) return {err:'Il numero della rata non può superare il numero totale delle rate.'};
+  if(tr>20) return {err:'La rateazione delle comunicazioni di irregolarità prevede al massimo 20 rate trimestrali.'};
+  if(!scad||!vers) return {err:'Inserire la scadenza della rata e la data del versamento.'};
+  const g=Math.round((toUTC(vers)-toUTC(scad))/DAY), last=!!(nr&&tr&&nr===tr), first=nr===1||tr===1;
+  const imp=r2(parseAmt($('#rv-imp').value))||cap;
+  if(g<=0) return {imp,giorni:0,nuovo:true,fascia:'none',perc:0,sanz:0,anni:[],interessi:0,totale:r2(cap+irat),ab:1,regimeLbl:'Rata versata entro la scadenza',
+    notes:['Versamento nei termini: si versano il capitale ('+cfg.cod[0]+')'+(irat?' e gli interessi di rateazione ('+cfg.intRat+')':'')+' con il codice atto della comunicazione.']};
+  if(first&&tr!==1&&g>7) return {err:'Prima rata versata con oltre 7 giorni di ritardo: decadenza dalla rateazione (art. 15-ter DPR 602/1973). Le somme sono iscritte a ruolo e il ravvedimento non è più possibile.'};
+  if(tr===1&&g>7) return {err:'Versamento in unica soluzione oltre 7 giorni dalla scadenza: la comunicazione non è più definibile con la sanzione ridotta e le somme sono iscritte a ruolo.'};
+  if(last&&g>90) return {err:'Ultima rata versata oltre 90 giorni dalla scadenza: decadenza dalla rateazione, ravvedimento non più possibile.'};
+  if(!last&&!first&&next&&vers>next) return {err:'La rata non è stata versata entro la scadenza della rata successiva: decadenza dalla rateazione, ravvedimento non più possibile.'};
+  const keep=impInp.value; if(!keep.trim()) impInp.value=fmt(imp);
+  const res=_calc.apply(this,arguments); impInp.value=keep;
+  if(res.err) return res;
+  res.ab=1; res.imp=imp; res.totale=r2(cap+irat+res.sanz+res.interessi);
+  res.notes.unshift('Sanzione ('+cfg.sanz+') e interessi legali ('+cfg.int+') calcolati sulla quota d’imposta della rata; restano dovuti gli interessi di rateazione (Ris. 132/E/2011).');
+  if(first&&g<=7) res.notes.unshift('Lieve inadempimento (art. 15-ter DPR 602/1973): ritardo della prima rata entro 7 giorni, la rateazione resta valida.');
+  if(!last&&!first&&!next) res.notes.push('Indica la scadenza della rata successiva per verificare il termine del ravvedimento.');
+  if(last) res.notes.push('Ultima rata: il ravvedimento è ammesso entro 90 giorni dalla scadenza.');
+  return res;
+};
+const _rows=rvRows;
+rvRows=function(res){
+  const cfg=cfgNow(); if(!cfg.ab) return _rows.apply(this,arguments);
+  const anno=$('#rv-anno').value.trim(), nr=ni('rv-nr'), tr=ni('rv-tr');
+  const rat=nr&&tr?String(nr).padStart(2,'0')+String(tr).padStart(2,'0'):'';
+  const cap=r2(parseAmt($('#rv-cap').value)), irat=r2(parseAmt($('#rv-irat').value));
+  const cod=($('#rv-cod').value.trim()||cfg.cod[0]).toUpperCase();
+  const out=[{sez:'erario',row:{cod,rat,anno,deb:fmt(cap)}}];
+  if(irat>0) out.push({sez:'erario',row:{cod:cfg.intRat,rat,anno,deb:fmt(irat)}});
+  if(res.interessi>0) out.push({sez:'erario',row:{cod:cfg.int,rat:'',anno,deb:fmt(res.interessi)}});
+  if(res.sanz>0) out.push({sez:'erario',row:{cod:cfg.sanz,rat:'',anno,deb:fmt(res.sanz)}});
+  return out;
+};
+/* inserimento: codice atto obbligatorio e riportato nella sezione Erario */
+document.getElementById('rv-insert').addEventListener('click',e=>{
+  const cfg=cfgNow(); if(!cfg.ab) return;
+  const atto=$('#rv-atto').value.replace(/\D/g,'');
+  if(!atto){ e.stopImmediatePropagation(); toast('Completare: codice atto della comunicazione'); $('#rv-atto').focus(); return; }
+  if(state.erarioAtto&&state.erarioAtto!==atto&&(state.erario||[]).some(r=>r.cod&&AB_SET.has(String(r.cod)))){ e.stopImmediatePropagation(); toast('Nel modello è già indicato il codice atto '+state.erarioAtto+': usa un F24 distinto per ogni comunicazione.'); return; }
+  state.erarioAtto=atto; const f=document.querySelector('[data-g="erarioAtto"]'); if(f) f.value=atto;
+},true);
+/* interessi di rateazione: 3,5% annuo dal 1° giorno del secondo mese successivo all'elaborazione alla scadenza della rata */
+$('#rv-irat-calc').addEventListener('click',()=>{
+  const el=$('#rv-elab').value, sc=$('#rv-scad').value, cap=r2(parseAmt($('#rv-cap').value)), nr=ni('rv-nr');
+  if(!el||!sc||!cap){ toast('Servono data di elaborazione, scadenza della rata e importo della rata.'); return; }
+  if(nr===1){ $('#rv-irat').value=''; rvCompute(); toast('La prima rata non comporta interessi di rateazione.'); return; }
+  const [y,m]=el.split('-').map(Number), dec=Date.UTC(y,m+1,1), gg=Math.round((toUTC(sc)-dec)/DAY)+1;
+  if(gg<=0){ $('#rv-irat').value=''; rvCompute(); toast('Nessun interesse: la scadenza precede la decorrenza.'); return; }
+  const v=r2(cap*0.035*gg/365); $('#rv-irat').value=fmt(v); rvCompute();
+  toast('Interessi di rateazione: € '+fmt(v)+' ('+gg+' giorni al 3,5%). Verifica con il piano della comunicazione.');
+});
+['rv-atto','rv-nr','rv-tr','rv-next','rv-cap','rv-irat','rv-elab'].forEach(id=>{ const el=document.getElementById(id); el.addEventListener(el.type==='date'?'change':'input',()=>rvCompute()); });
+['rv-cap','rv-irat'].forEach(id=>document.getElementById(id).addEventListener('blur',e=>{ if(e.target.value.trim()) e.target.value=fmt(parseAmt(e.target.value)); rvCompute(); }));
+$('#rv-atto').addEventListener('input',e=>{ e.target.value=e.target.value.replace(/\D/g,'').slice(0,11); });
+
+/* promemoria nella redazione: i codici delle comunicazioni richiedono il codice atto */
+document.addEventListener('change',e=>{
+  const t=e.target; if(!t||t.tagName!=='INPUT') return;
+  const v=String(t.value||'').trim().toUpperCase(); if(!AB_SET.has(v)||t.id==='rv-cod') return;
+  if(!t.closest('#page-form,.sec-body')) return;
+  if(!state.erarioAtto) toast('Codice '+v+': indica il codice atto della comunicazione nel campo della sezione Erario.');
+});
+
+rebuildSelect(); rvTribChange(); try{ rvCompute(); }catch(e){}
+})();
+</script>
 </body>
 </html>
