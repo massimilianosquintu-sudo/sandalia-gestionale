@@ -3,6 +3,43 @@
 (function(){var P=null;try{if(window.parent&&window.parent!==window&&window.parent.PORTALE)P=window.parent}catch(e){}window.PORTALE_HOST=P;if(!P)return;try{if(P.claude&&P.claude.use){window.claude={use:function(n){return P.suiteUse(n,"forf")}}}}catch(e){}document.addEventListener("keydown",function(e){if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();try{P.SUITE.openByIndex(+e.key-1)}catch(_){}}});})();</script>
 <meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Contabilità Forfettaria</title>
+<dialog id="fe-vista" aria-labelledby="fe-titolo">
+  <div class="fe-head">
+    <div><h2 id="fe-titolo">Documento</h2><div class="sub" id="fe-file"></div></div>
+    <span class="spacer"></span>
+    <button class="btn small" type="button" id="fe-prec" aria-label="Documento precedente">‹ Precedente</button>
+    <button class="btn small" type="button" id="fe-succ" aria-label="Documento successivo">Successivo ›</button>
+    <button class="btn small" type="button" id="fe-chiudi" aria-label="Chiudi">Chiudi</button>
+  </div>
+  <div class="fe-corpo" id="fe-corpo"></div>
+  <div class="fe-foot"><span class="hint" id="fe-msg" role="status"></span><span class="spacer"></span>
+    <button class="btn small" type="button" id="fe-stampa">Stampa</button>
+    <button class="btn small" type="button" id="fe-modifica">Modifica la scrittura</button>
+    <button class="btn small pri" type="button" id="fe-registra">Registra</button></div>
+</dialog>
+<style>
+#fe-vista{width:min(980px,calc(100vw - 32px));max-height:calc(100vh - 32px);padding:0;border:1px solid var(--line-strong, var(--line));border-radius:var(--r, 12px);background:var(--surface);color:var(--ink);box-shadow:var(--shadow, 0 12px 40px rgba(0,0,0,.25))}
+#fe-vista[open]{display:flex;flex-direction:column}
+#fe-vista::backdrop{background:rgba(8,18,28,.45)}
+.fe-head,.fe-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line)}
+.fe-foot{border-bottom:0;border-top:1px solid var(--line)}
+.fe-head h2{margin:0;font-size:17px}
+.fe-corpo{overflow:auto;padding:16px;flex:1;min-height:200px}
+.fe-top{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.fe-k{font:600 11px/1.3 var(--f-mono);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+.fe-tit{font:600 20px/1.25 var(--f-display)}
+.fe-tot{text-align:right}
+.fe-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:12px}
+.fe-sogg,.fe-box{border:1px solid var(--line);border-radius:var(--r-sm, 8px);padding:10px 12px;background:var(--surface-2);overflow-wrap:anywhere}
+.fe-box{margin-bottom:12px}
+.fe-nome{font-weight:600;margin-bottom:2px}
+.fe-tab{margin-bottom:12px}
+.fe-tab td{vertical-align:top}
+.fe-totali{max-width:420px;margin:0 0 12px auto}
+.fe-pag,.fe-img{display:block;width:100%;height:auto;margin:0 auto 10px;border:1px solid var(--line);background:#fff}
+@media (max-width:600px){.fe-tot{text-align:left}.fe-tit{font-size:17px}}
+@media print{body.stampa-fe *{visibility:hidden}body.stampa-fe #fe-vista,body.stampa-fe #fe-vista *{visibility:visible}body.stampa-fe #fe-vista{position:absolute;inset:0 auto auto 0;width:100%;max-height:none;border:0;box-shadow:none}body.stampa-fe .fe-head button,body.stampa-fe .fe-foot{display:none}body.stampa-fe .fe-corpo{overflow:visible}}
+</style>
 <script>
 /* ======================= Collegamento diretto all'API di Anthropic (fuori da Claude) =======================
    Dentro Claude l'agente usa la capacità integrata; aperto come file, usa la chiave API dello Studio
@@ -782,6 +819,7 @@ async function registra(v) {
 }
 async function proponi(list) {
   const auto = $("#opt-auto").checked;
+  for (const v of list) if (!v.vista && v.file && vistaFiles.has(v.file)) v.vista = { blob: vistaFiles.get(v.file) };
   for (const v of list) {
     const dup = S.regs.some(r => r.chiave === chiaveDi(v)) || S.coda.some(q => chiaveDi(q) === chiaveDi(v));
     if (dup) v.anomalie.push("Già presente nel registro o in coda");
@@ -944,7 +982,7 @@ function estraiDaP7m(bytes) {
 const T = (el, n) => { if (!el) return ""; const x = el.getElementsByTagNameNS("*", n)[0]; return x ? x.textContent.trim() : ""; };
 const soloCifre = s => String(s || "").replace(/\D/g, "");
 
-function leggiFattura(name, doc) {
+function leggiFattura(name, doc, testoXml) {
   const c = clienteCorrente();
   const header = doc.getElementsByTagNameNS("*", "FatturaElettronicaHeader")[0];
   const ced = header && header.getElementsByTagNameNS("*", "CedentePrestatore")[0];
@@ -960,8 +998,9 @@ function leggiFattura(name, doc) {
   else if (!eCedente && (pivaCli || cfCli)) ruolo = "estranea";
   const regole = { ...(c.contiFornitori || {}), ...S.regoleNuove };
   const FATT = ["TD01", "TD02", "TD03", "TD05", "TD06", "TD24", "TD25"];
-  const voci = [];
+  const voci = []; let bi = -1;
   for (const body of doc.getElementsByTagNameNS("*", "FatturaElettronicaBody")) {
+    bi++;
     const dg = body.getElementsByTagNameNS("*", "DatiGeneraliDocumento")[0];
     const td = T(dg, "TipoDocumento");
     let imp = 0, iva = 0;
@@ -1001,6 +1040,7 @@ function leggiFattura(name, doc) {
       }));
     }
   }
+  if (testoXml) voci.forEach((v, i) => { v.vista = { xml: testoXml, body: v.bodyIdx ?? i }; });
   const tipoMsg = ruolo === "ricevuta" ? "ricevut" : "emess";
   log(name, voci.length ? `${voci.length === 1 ? `Fattura ${tipoMsg}a letta` : `${voci.length} fatture ${tipoMsg}e lette`} dal tracciato` : "Nessuna fattura nel file", voci.length ? "ok" : "err");
   return proponi(voci);
@@ -1028,7 +1068,7 @@ async function gestisciXml(name, text) {
   if (doc.getElementsByTagName("parsererror").length) throw new Error("XML non valido");
   const root = doc.documentElement.localName;
   if (/FileMetadati/i.test(root)) return;
-  if (/FatturaElettronica/i.test(root)) return leggiFattura(name, doc);
+  if (/FatturaElettronica/i.test(root)) return leggiFattura(name, doc, text);
   if (leggiCorrispettivoRT(name, doc)) return;
   return agenteTesto(name, text);
 }
@@ -1080,6 +1120,7 @@ async function gestisciFile(files) {
         return gestisciXml(name, xml);
       }
       if (low.endsWith(".xml")) return gestisciXml(name, decodifica(new Uint8Array(await blob.arrayBuffer())));
+      if (low.endsWith(".pdf") || /\.(jpe?g|png|webp|gif)$/.test(low)) vistaFiles.set(name, blob);
       if (low.endsWith(".pdf")) return gestisciPdf(name, blob);
       if (/\.(jpe?g|png|webp|gif)$/.test(low)) { immagini.push([name, blob]); return; }
       if (/\.(csv|txt)$/.test(low)) return agenteTesto(name, await blob.text());
@@ -1277,6 +1318,143 @@ async function leggiExcel(name, blob) {
 }
 async function gestisciExcel(name, blob) { return (await leggiExcel(name, blob)).run(); }
 
+
+/* ======================= VISUALIZZAZIONE DEI DOCUMENTI PRIMA DELLA REGISTRAZIONE ======================= */
+const FE_TD = { TD01: "Fattura", TD02: "Acconto/anticipo su fattura", TD03: "Acconto/anticipo su parcella", TD04: "Nota di credito", TD05: "Nota di debito", TD06: "Parcella", TD07: "Fattura semplificata", TD08: "Nota di credito semplificata", TD09: "Nota di debito semplificata", TD16: "Integrazione fattura reverse charge interno", TD17: "Integrazione/autofattura acquisto servizi dall'estero", TD18: "Integrazione acquisto di beni intracomunitari", TD19: "Integrazione/autofattura acquisto di beni ex art. 17 c.2", TD20: "Autofattura per regolarizzazione", TD21: "Autofattura per splafonamento", TD22: "Estrazione beni da deposito IVA", TD23: "Estrazione beni da deposito IVA con versamento", TD24: "Fattura differita (art. 21 c.4 lett. a)", TD25: "Fattura differita (art. 21 c.4 terzo periodo lett. b)", TD26: "Cessione beni ammortizzabili e passaggi interni", TD27: "Autoconsumo o cessioni gratuite senza rivalsa", TD28: "Acquisti da San Marino con IVA" };
+const FE_MP = { MP01: "Contanti", MP02: "Assegno", MP03: "Assegno circolare", MP04: "Contanti presso Tesoreria", MP05: "Bonifico", MP06: "Vaglia cambiario", MP07: "Bollettino bancario", MP08: "Carta di pagamento", MP09: "RID", MP10: "RID utenze", MP11: "RID veloce", MP12: "RIBA", MP13: "MAV", MP14: "Quietanza erario", MP15: "Giroconto su conti di contabilità speciale", MP16: "Domiciliazione bancaria", MP17: "Domiciliazione postale", MP18: "Bollettino di c/c postale", MP19: "SEPA Direct Debit", MP20: "SEPA Direct Debit CORE", MP21: "SEPA Direct Debit B2B", MP22: "Trattenuta su somme già riscosse", MP23: "PagoPA" };
+const FE_ESIG = { I: "immediata", D: "differita", S: "scissione dei pagamenti" };
+const FE_RF = { RF01: "Ordinario", RF02: "Contribuenti minimi", RF04: "Agricoltura e pesca", RF18: "Altro", RF19: "Forfettario" };
+const feEl = (el, n) => el ? el.getElementsByTagNameNS("*", n)[0] || null : null;
+const feAll = (el, n) => el ? [...el.getElementsByTagNameNS("*", n)] : [];
+const feN = (v, dec) => { const n = parseFloat(v); return isFinite(n) ? n.toLocaleString("it-IT", { minimumFractionDigits: dec ?? 2, maximumFractionDigits: dec ?? 2 }) : ""; };
+const feQ = v => { const n = parseFloat(v); return isFinite(n) ? n.toLocaleString("it-IT", { maximumFractionDigits: 4 }) : ""; };
+const feD = v => /^\d{4}-\d{2}-\d{2}/.test(v || "") ? itDate(v.slice(0, 10)) : esc(v || "");
+function feSoggetto(el, titolo, extra) {
+  if (!el) return "";
+  const an = feEl(el, "Anagrafica"), sede = feEl(el, "Sede"), idf = feEl(el, "IdFiscaleIVA");
+  const nome = T(an, "Denominazione") || [T(an, "Titolo"), T(an, "Nome"), T(an, "Cognome")].filter(Boolean).join(" ");
+  const piva = idf ? `${T(idf, "IdPaese")}${T(idf, "IdCodice")}` : "", cf = T(feEl(el, "DatiAnagrafici"), "CodiceFiscale");
+  const ind = sede ? [[T(sede, "Indirizzo"), T(sede, "NumeroCivico")].filter(Boolean).join(" "), [T(sede, "CAP"), T(sede, "Comune"), T(sede, "Provincia") ? `(${T(sede, "Provincia")})` : ""].filter(Boolean).join(" "), T(sede, "Nazione") && T(sede, "Nazione") !== "IT" ? T(sede, "Nazione") : ""].filter(Boolean) : [];
+  const rf = T(el, "RegimeFiscale");
+  return `<div class="fe-sogg"><div class="fe-k">${titolo}</div><div class="fe-nome">${esc(nome)}</div>
+    ${piva ? `<div>P.IVA <span class="mono">${esc(piva)}</span></div>` : ""}${cf ? `<div>C.F. <span class="mono">${esc(cf)}</span></div>` : ""}
+    ${ind.map(x => `<div>${esc(x)}</div>`).join("")}${rf ? `<div class="sub">Regime fiscale ${esc(rf)}${FE_RF[rf] ? ` · ${FE_RF[rf]}` : ""}</div>` : ""}${extra || ""}</div>`;
+}
+function htmlFattura(xml, bi) {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  const head = feEl(doc, "FatturaElettronicaHeader"), body = feAll(doc, "FatturaElettronicaBody")[bi || 0];
+  if (!head || !body) return { html: `<p class="empty">Tracciato non leggibile.</p>`, allegati: [] };
+  const tr = feEl(head, "DatiTrasmissione"), dg = feEl(body, "DatiGeneraliDocumento"), td = T(dg, "TipoDocumento"), div = T(dg, "Divisa") || "EUR";
+  const dest = T(tr, "CodiceDestinatario"), pec = T(tr, "PECDestinatario");
+  const out = [];
+  out.push(`<div class="fe-top"><div><div class="fe-k">${esc(td)} · ${esc(FE_TD[td] || "Documento")}</div><div class="fe-tit">N. ${esc(T(dg, "Numero"))} del ${feD(T(dg, "Data"))}</div></div>
+    <div class="fe-tot"><div class="fe-k">Totale documento</div><div class="fe-tit mono">${feN(T(dg, "ImportoTotaleDocumento")) || "–"} ${div !== "EUR" ? esc(div) : "€"}</div></div></div>`);
+  out.push(`<div class="fe-grid">${feSoggetto(feEl(head, "CedentePrestatore"), "Cedente / prestatore")}${feSoggetto(feEl(head, "CessionarioCommittente"), "Cessionario / committente", dest || pec ? `<div class="sub">Recapito SdI: <span class="mono">${esc(pec || dest)}</span></div>` : "")}</div>`);
+  const terzo = feEl(head, "TerzoIntermediarioOSoggettoEmittente");
+  if (terzo) out.push(`<div class="fe-grid">${feSoggetto(terzo, "Terzo intermediario o soggetto emittente")}</div>`);
+  const causali = feAll(dg, "Causale").map(x => x.textContent.trim()).filter(Boolean);
+  if (causali.length) out.push(`<div class="fe-box"><div class="fe-k">Causale</div>${causali.map(esc).join("<br>")}</div>`);
+  const coll = [["DatiOrdineAcquisto", "Ordine"], ["DatiContratto", "Contratto"], ["DatiConvenzione", "Convenzione"], ["DatiRicezione", "Ricezione"], ["DatiFattureCollegate", "Fattura collegata"]]
+    .flatMap(([t, l]) => feAll(body, t).map(x => `${l} ${esc(T(x, "IdDocumento"))}${T(x, "Data") ? ` del ${feD(T(x, "Data"))}` : ""}${T(x, "CodiceCIG") ? ` · CIG ${esc(T(x, "CodiceCIG"))}` : ""}${T(x, "CodiceCUP") ? ` · CUP ${esc(T(x, "CodiceCUP"))}` : ""}`))
+    .concat(feAll(body, "DatiDDT").map(x => `DDT ${esc(T(x, "NumeroDDT"))} del ${feD(T(x, "DataDDT"))}`));
+  if (coll.length) out.push(`<div class="fe-box"><div class="fe-k">Documenti collegati</div>${coll.join("<br>")}</div>`);
+  const linee = feAll(body, "DettaglioLinee");
+  out.push(`<div class="tbl-wrap"><table class="fe-tab"><thead><tr><th>Descrizione</th><th class="num">Quantità</th><th class="num">Prezzo unitario</th><th class="num">Importo</th><th class="num">IVA</th></tr></thead><tbody>${linee.map(l => {
+    const sc = feAll(l, "ScontoMaggiorazione").map(s => `${T(s, "Tipo") === "MG" ? "+" : "−"}${T(s, "Percentuale") ? feQ(T(s, "Percentuale")) + "%" : feN(T(s, "Importo"))}`).join(" ");
+    const cod = feAll(l, "CodiceArticolo").map(c => T(c, "CodiceValore")).filter(Boolean).join(" · ");
+    const al = parseFloat(T(l, "AliquotaIVA")) || 0;
+    return `<tr><td>${esc(T(l, "Descrizione"))}${cod ? `<div class="sub">Cod. ${esc(cod)}</div>` : ""}${T(l, "DataInizioPeriodo") ? `<div class="sub">Periodo ${feD(T(l, "DataInizioPeriodo"))} – ${feD(T(l, "DataFinePeriodo"))}</div>` : ""}${sc ? `<div class="sub">Sconto/maggiorazione ${esc(sc)}</div>` : ""}</td>
+      <td class="num">${feQ(T(l, "Quantita"))}${T(l, "UnitaMisura") ? ` ${esc(T(l, "UnitaMisura"))}` : ""}</td><td class="num">${feN(T(l, "PrezzoUnitario"), (T(l, "PrezzoUnitario").split(".")[1] || "").length > 2 ? 4 : 2)}</td><td class="num">${feN(T(l, "PrezzoTotale"))}</td><td class="num">${al ? feQ(al) + "%" : esc(T(l, "Natura"))}</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="empty">Nessuna riga di dettaglio</td></tr>`}</tbody></table></div>`);
+  const riep = feAll(body, "DatiRiepilogo");
+  let imp = 0, iva = 0;
+  out.push(`<div class="tbl-wrap"><table class="fe-tab"><thead><tr><th>Riepilogo IVA</th><th class="num">Imponibile</th><th class="num">Imposta</th><th>Esigibilità</th></tr></thead><tbody>${riep.map(r => {
+    imp += parseFloat(T(r, "ImponibileImporto")) || 0; iva += parseFloat(T(r, "Imposta")) || 0;
+    const al = parseFloat(T(r, "AliquotaIVA")) || 0;
+    return `<tr><td>${al ? feQ(al) + "%" : esc(T(r, "Natura"))}${T(r, "RiferimentoNormativo") ? `<div class="sub">${esc(T(r, "RiferimentoNormativo"))}</div>` : ""}</td><td class="num">${feN(T(r, "ImponibileImporto"))}</td><td class="num">${feN(T(r, "Imposta"))}</td><td>${esc(FE_ESIG[T(r, "EsigibilitaIVA") || "I"] || T(r, "EsigibilitaIVA"))}</td></tr>`;
+  }).join("")}</tbody></table></div>`);
+  const tot = [["Imponibile", imp], ["IVA", iva]];
+  for (const c of feAll(dg, "DatiCassaPrevidenziale")) tot.push([`Cassa previdenziale ${T(c, "TipoCassa")} ${feQ(T(c, "AlCassa"))}%`, parseFloat(T(c, "ImportoContributoCassa")) || 0]);
+  const bollo = feEl(dg, "DatiBollo"); if (bollo) tot.push(["Imposta di bollo", parseFloat(T(bollo, "ImportoBollo")) || 0]);
+  for (const r of feAll(dg, "DatiRitenuta")) tot.push([`Ritenuta ${T(r, "TipoRitenuta")} ${feQ(T(r, "AliquotaRitenuta"))}%`, -(parseFloat(T(r, "ImportoRitenuta")) || 0)]);
+  out.push(`<div class="lm fe-totali">${tot.map(([l, v]) => `<div><span>${esc(l)}</span><span class="mono">${feN(v)}</span></div>`).join("")}<div><span><strong>Totale documento</strong></span><span class="mono"><strong>${feN(T(dg, "ImportoTotaleDocumento")) || feN(imp + iva)}</strong></span></div></div>`);
+  const pag = feAll(body, "DettaglioPagamento");
+  if (pag.length) out.push(`<div class="tbl-wrap"><table class="fe-tab"><thead><tr><th>Pagamento</th><th>Scadenza</th><th class="num">Importo</th><th>Coordinate</th></tr></thead><tbody>${pag.map(x => `<tr><td>${esc(FE_MP[T(x, "ModalitaPagamento")] || T(x, "ModalitaPagamento"))}${T(x, "Beneficiario") ? `<div class="sub">${esc(T(x, "Beneficiario"))}</div>` : ""}</td><td>${feD(T(x, "DataScadenzaPagamento")) || "–"}</td><td class="num">${feN(T(x, "ImportoPagamento"))}</td><td>${T(x, "IBAN") ? `<span class="mono">${esc(T(x, "IBAN"))}</span>` : ""}${T(x, "IstitutoFinanziario") ? `<div class="sub">${esc(T(x, "IstitutoFinanziario"))}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>`);
+  const allegati = feAll(body, "Allegati").map(a => ({ nome: T(a, "NomeAttachment") || "allegato", formato: (T(a, "FormatoAttachment") || "").toUpperCase(), descr: T(a, "DescrizioneAttachment"), b64: T(a, "Attachment").replace(/\s+/g, "") }));
+  if (allegati.length) out.push(`<div class="fe-box"><div class="fe-k">Allegati</div>${allegati.map((a, i) => `<div class="row" style="margin:4px 0"><span>${esc(a.nome)}${a.descr ? ` <span class="sub">· ${esc(a.descr)}</span>` : ""}</span><span class="spacer"></span>${/PDF/.test(a.formato) || /\.pdf$/i.test(a.nome) ? `<button type="button" class="btn small" data-fe-all="${i}">Mostra</button>` : ""}<button type="button" class="btn small" data-fe-scarica="${i}">Scarica</button></div>`).join("")}<div id="fe-all-vista"></div></div>`);
+  return { html: out.join(""), allegati };
+}
+const feBytes = b64 => { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
+async function feMostraPdf(bytes, box) {
+  box.innerHTML = `<p class="hint">Apertura del PDF…</p>`;
+  try {
+    await caricaLib("pdf");
+    const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise, w = Math.min(box.clientWidth || 760, 900);
+    box.innerHTML = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
+      const pg = await pdf.getPage(i), vp0 = pg.getViewport({ scale: 1 }), sc = (w / vp0.width) * (window.devicePixelRatio || 1), vp = pg.getViewport({ scale: sc });
+      const cv = document.createElement("canvas"); cv.width = vp.width; cv.height = vp.height; cv.className = "fe-pag"; cv.setAttribute("aria-label", `Pagina ${i}`);
+      box.appendChild(cv); await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+    }
+    if (pdf.numPages > 20) box.insertAdjacentHTML("beforeend", `<p class="hint">Mostrate le prime 20 pagine di ${pdf.numPages}.</p>`);
+  } catch (e) { box.innerHTML = `<p class="err">PDF non visualizzabile: ${esc(e.message || String(e))}</p>`; }
+}
+
+let FEV = null;      // { id, allegati, url }
+const vistaFiles = new Map();   // PDF e immagini letti in questa sessione: nome → file
+function feChiudiUrl() { if (FEV?.url) { try { URL.revokeObjectURL(FEV.url); } catch {} } }
+async function apriVista(v) {
+  const dlg = $("#fe-vista"); if (!v?.vista) return;
+  feChiudiUrl();
+  FEV = { id: v.id, allegati: [], url: null };
+  const box = $("#fe-corpo"), conVista = S.coda.filter(q => q.vista), pos = conVista.indexOf(v);
+  $("#fe-titolo").textContent = `${TIPI[v.tipo] || "Documento"} ${v.numero || ""}${v.controparte ? ` · ${v.controparte}` : ""}`;
+  $("#fe-file").textContent = `${v.file || ""}${conVista.length > 1 ? ` · documento ${pos + 1} di ${conVista.length}` : ""}`;
+  $("#fe-prec").disabled = pos <= 0; $("#fe-succ").disabled = pos < 0 || pos >= conVista.length - 1;
+  $("#fe-registra").disabled = v.tipo === "non_rilevante";
+  $("#fe-msg").textContent = (v.anomalie || []).join(" · ");
+  if (v.vista.xml) { const r = htmlFattura(v.vista.xml, v.vista.body); box.innerHTML = r.html; FEV.allegati = r.allegati; }
+  else if (v.vista.blob) {
+    const nome = String(v.file || "").toLowerCase();
+    if (/\.pdf$/.test(nome) || v.vista.blob.type === "application/pdf") { box.innerHTML = `<div id="fe-all-vista"></div>`; feMostraPdf(new Uint8Array(await v.vista.blob.arrayBuffer()), $("#fe-all-vista")); }
+    else { FEV.url = URL.createObjectURL(v.vista.blob); box.innerHTML = `<img class="fe-img" src="${FEV.url}" alt="${esc(v.file || "Documento")}">`; }
+  }
+  if (!dlg.open) { if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", ""); }
+  box.scrollTop = 0;
+}
+function feChiudi() { const dlg = $("#fe-vista"); feChiudiUrl(); FEV = null; if (dlg.open) { if (dlg.close) dlg.close(); else dlg.removeAttribute("open"); } }
+(() => {
+  const dlg = $("#fe-vista"); if (!dlg) return;
+  const corrente = () => S.coda.find(q => q.id === FEV?.id);
+  const sposta = d => { const l = S.coda.filter(q => q.vista), i = l.indexOf(corrente()); if (l[i + d]) apriVista(l[i + d]); };
+  $("#fe-chiudi").addEventListener("click", feChiudi);
+  dlg.addEventListener("close", () => { feChiudiUrl(); FEV = null; });
+  dlg.addEventListener("click", e => { if (e.target === dlg) feChiudi(); });
+  $("#fe-prec").addEventListener("click", () => sposta(-1));
+  $("#fe-succ").addEventListener("click", () => sposta(1));
+  dlg.addEventListener("keydown", e => { if (e.target.closest("input,select,textarea")) return; if (e.key === "ArrowRight") sposta(1); else if (e.key === "ArrowLeft") sposta(-1); });
+  $("#fe-registra").addEventListener("click", async () => {
+    const v = corrente(); if (!v) return;
+    const l = S.coda.filter(q => q.vista), i = l.indexOf(v), next = l[i + 1] || l[i - 1];
+    $("#fe-registra").disabled = true; await registraVoci([v]);
+    if (S.coda.includes(v)) return apriVista(v);       // non registrata: resta aperta con il messaggio
+    next && S.coda.includes(next) ? apriVista(next) : feChiudi();
+  });
+  $("#fe-modifica").addEventListener("click", () => { const v = corrente(); if (!v) return; feChiudi(); const tr = $(`#coda-body tr[data-id="${CSS.escape(v.id)}"]`); if (tr) { tr.scrollIntoView({ block: "center" }); tr.querySelector("input,select")?.focus(); } });
+  $("#fe-stampa").addEventListener("click", () => { document.body.classList.add("stampa-fe"); try { window.print(); } catch {} setTimeout(() => document.body.classList.remove("stampa-fe"), 500); });
+  $("#fe-corpo").addEventListener("click", async e => {
+    const a = e.target.closest("[data-fe-all]"), s = e.target.closest("[data-fe-scarica]");
+    if (a) { const x = FEV?.allegati[+a.dataset.feAll]; if (x) feMostraPdf(feBytes(x.b64), $("#fe-all-vista")); }
+    if (s) {
+      const x = FEV?.allegati[+s.dataset.feScarica]; if (!x) return;
+      const nome = /\.\w{2,4}$/.test(x.nome) ? x.nome : `${x.nome}.${(x.formato || "pdf").toLowerCase()}`;
+      const blob = new Blob([feBytes(x.b64)], { type: /PDF/.test(x.formato) || /\.pdf$/i.test(nome) ? "application/pdf" : "application/octet-stream" });
+      if (S.downloads) { try { await S.downloads.save({ filename: nome, data: blob }); } catch (e) { $("#fe-msg").textContent = e?.code === "declined" ? "Salvataggio annullato." : "Scaricamento non riuscito."; } return; }
+      const u = URL.createObjectURL(blob), l = document.createElement("a"); l.href = u; l.download = nome; document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
+    }
+  });
+})();
+
 /* ---------- agente AI ---------- */
 function promptBase(fonte) {
   const c = clienteCorrente();
@@ -1415,7 +1593,7 @@ function renderCoda() {
           <input class="d" type="date" data-f="dataIncasso" value="${esc(v.dataIncasso)}" aria-label="Data di incasso o pagamento"${v.incassato ? "" : " hidden"}></td>
       <td><span class="pill src">${FONTI[v.fonte] || v.fonte}</span> <span class="pill ${v.tipo === "non_rilevante" ? "nr" : v.confidenza}">${v.tipo === "non_rilevante" ? "escludere" : v.confidenza}</span>
           ${v.anomalie.map(a => `<div class="anom">${esc(a)}</div>`).join("")}</td>
-      <td><div class="row" style="flex-wrap:nowrap"><button class="btn small pri" data-act="reg"${v.tipo === "non_rilevante" ? " disabled" : ""}>Registra</button><button class="btn small" data-act="scarta">Scarta</button></div></td>
+      <td><div class="row" style="flex-wrap:nowrap">${v.vista ? `<button class="btn small" data-act="vedi" aria-label="Vedi il documento ${esc(v.numero || "")}">Vedi</button>` : ""}<button class="btn small pri" data-act="reg"${v.tipo === "non_rilevante" ? " disabled" : ""}>Registra</button><button class="btn small" data-act="scarta">Scarta</button></div></td>
     </tr>`;
   }).join("");
 }
@@ -1995,6 +2173,7 @@ $("#coda-body").addEventListener("click", async e => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const tr = b.closest("tr[data-id]"); const v = S.coda.find(x => x.id === tr.dataset.id); if (!v) return;
   if (b.dataset.act === "scarta") { S.coda = S.coda.filter(x => x !== v); S.selCoda.delete(v.id); return renderCoda(); }
+  if (b.dataset.act === "vedi") return apriVista(v);
   b.disabled = true;
   try {
     const esito = await registra(v);
@@ -2750,6 +2929,7 @@ html.stampa-pdf .solo-stampa.st-attiva{display:block!important;position:absolute
 })();
 
 /*/STAMPA-PDF*/</script>
+
 <script>
 /* Portale Studio Sandalia – collegamenti della Contabilità Forfettaria con il portale (attivi solo dentro il portale) */
 (function () {
