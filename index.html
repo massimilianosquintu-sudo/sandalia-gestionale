@@ -990,13 +990,14 @@ const stessoSoggetto = (a, b) => { const ka = chiavi(a), kb = chiavi(b); return 
 let CLIENTI = [], CLI_PRONTI = false, ATTIVO = null;
 try { ATTIVO = localStorage.getItem('portale-attivo') || null; } catch (e) {}
 const LS_CLI = 'portale-clienti-v1', LS_STUDIO = 'portale-studio-v1';
-function cliOrdina() { CLIENTI.sort((a, b) => nomeCli(a).localeCompare(nomeCli(b), 'it')); }
+function cliOrdina() { CLIENTI.forEach(completaNascita); CLIENTI.sort((a, b) => nomeCli(a).localeCompare(nomeCli(b), 'it')); }
 function cliLocale() { CLIENTI = Object.values(ls(LS_CLI) || {}); cliOrdina(); CLI_PRONTI = true; aggiorna(); }
 function cliSub() {
   DBNS.collection('pt_clienti').onSnapshot(s => { CLIENTI = s.docs.map(d => ({ id: d.id, ...d.data() })); cliOrdina(); CLI_PRONTI = true; aggiorna(); },
     () => { toast('Archivio dei clienti non raggiungibile: ricarica la pagina.'); });
 }
 async function cliPut(c) {
+  completaNascita(c);
   const { id, ...body } = c;
   if (DBNS) { const x = dbPulito(body); await dbRiprova(() => DBNS.collection('pt_clienti').doc(id).set(x)); return; }
   const o = ls(LS_CLI) || {}; o[id] = c; if (!lsSet(LS_CLI, o)) throw new Error('spazio esaurito'); cliLocale();
@@ -1329,9 +1330,10 @@ function verificaCf(inputId, hintId, decodifica) {
   if (!d) { hint(hintId, 'Struttura del codice fiscale non valida', 'err'); return false; }
   if (!d.controllo) { hint(hintId, `Carattere di controllo errato: atteso ${ctrlCf(v)}`, 'err'); return false; }
   if (decodifica) {
-    $('#k-sesso').value = d.sesso; if (d.data) $('#k-nasc-data').value = d.data;
-    if (d.comune) { $('#k-nasc-com').value = d.comune; $('#k-nasc-prov').value = d.prov; }
-    hint(hintId, `${d.sesso === 'F' ? 'Nata' : 'Nato'} il ${itDate(d.data)}${d.comune ? ' a ' + d.comune + ' (' + d.prov + ')' : ''}`, 'ok');
+    // 'vuoti': completa solo i campi non compilati (apertura della scheda, cambio di tipo); true: sovrascrive (codice digitato)
+    const metti = (id, val) => { const el = $('#' + id); if (val && (decodifica === true || !el.value)) { const prima = el.value; el.value = val; return prima !== val; } return false; };
+    const cambiati = [metti('k-sesso', d.sesso), metti('k-nasc-data', d.data), metti('k-nasc-com', d.comune), metti('k-nasc-prov', d.prov)].some(Boolean);
+    hint(hintId, `${d.sesso === 'F' ? 'Nata' : 'Nato'} il ${itDate(d.data)}${d.comune ? ' a ' + d.comune + ' (' + d.prov + ')' : ' · comune di nascita non trovato: inseriscilo a mano'}${cambiati && decodifica === 'vuoti' ? ' · dati di nascita ricavati dal codice fiscale: salva per confermarli' : ''}`, 'ok');
   } else hint(hintId, 'Codice fiscale valido', 'ok');
   return true;
 }
@@ -1349,7 +1351,22 @@ function collegaCatastale(pref) {
   });
 }
 collegaCatastale('sede'); collegaCatastale('res');
-$('#k-cf').addEventListener('input', () => verificaCf('k-cf', 'k-cf-h', $('#k-tipo').value === 'PF'));
+/* sesso, data e luogo di nascita dal codice fiscale delle persone fisiche, anche per i clienti importati o inseriti prima */
+function completaNascita(c) {
+  try {
+    if (!c || c.tipo !== 'PF' || (c.sesso && c.nascitaData && c.nascitaComune && c.nascitaProv)) return c;
+    const d = decodCf(up(c.cf).replace(/\s/g, '')); if (!d || !d.controllo) return c;
+    if (!c.sesso) c.sesso = d.sesso; if (!c.nascitaData && d.data) c.nascitaData = d.data;
+    if (!c.nascitaComune && d.comune) { c.nascitaComune = d.comune; if (!c.nascitaProv) c.nascitaProv = d.prov; }
+  } catch (e) {}
+  return c;
+}
+$('#k-cf').addEventListener('input', () => {
+  const v = up($('#k-cf').value).replace(/\s/g, '');
+  // un codice fiscale di 16 caratteri appartiene a una persona fisica: nel nuovo cliente il tipo si imposta da solo
+  if ($('#k-tipo').value !== 'PF' && (!SCHEDA || SCHEDA.nuovo) && RE_CF.test(v)) { $('#k-tipo').value = 'PF'; $('#k-tipo').dispatchEvent(new Event('change')); }
+  verificaCf('k-cf', 'k-cf-h', $('#k-tipo').value === 'PF');
+});
 $('#k-rapp-cf').addEventListener('input', () => verificaCf('k-rapp-cf', 'k-rapp-h'));
 $('#k-int-cf').addEventListener('input', () => verificaCf('k-int-cf', 'k-int-h'));
 $('#k-piva').addEventListener('input', () => { const v = cifre($('#k-piva').value); if (!v) hint('k-piva-h', ''); else if (v.length < 11) hint('k-piva-h', 'La partita IVA ha 11 cifre', 'warn'); else hint('k-piva-h', pivaOk(v) ? 'Partita IVA valida' : 'Cifra di controllo errata', pivaOk(v) ? 'ok' : 'err'); });
@@ -1365,7 +1382,7 @@ function visibilita() {
   $$('#cl-form [data-non]').forEach(el => el.hidden = el.dataset.non === t);
   $('#k-sede-leg').textContent = t === 'PF' ? 'Sede dell’attività o domicilio fiscale' : 'Sede legale';
 }
-$('#k-tipo').addEventListener('change', () => { const t = $('#k-tipo').value; formeTipo(t); if (t === 'PF' && $('#k-regime').value === 'ordinaria' && (!SCHEDA || SCHEDA.nuovo)) $('#k-regime').value = 'forfettaria'; visibilita(); verificaCf('k-cf', 'k-cf-h', false); });
+$('#k-tipo').addEventListener('change', () => { const t = $('#k-tipo').value; formeTipo(t); if (t === 'PF' && $('#k-regime').value === 'ordinaria' && (!SCHEDA || SCHEDA.nuovo)) $('#k-regime').value = 'forfettaria'; visibilita(); verificaCf('k-cf', 'k-cf-h', t === 'PF' ? 'vuoti' : false); });
 
 function apriScheda(id) {
   SCHEDA = id === '' ? { nuovo: true } : CLIENTI.find(c => c.id === id) || null;
@@ -1377,7 +1394,7 @@ function apriScheda(id) {
   $('#k-tipo').value = c.tipo || 'SC'; formeTipo($('#k-tipo').value, c.forma);
   visibilita();
   ['k-cf-h', 'k-piva-h', 'k-rapp-h', 'k-int-h', 'k-sede-h', 'k-res-h', 'k-ateco-h'].forEach(h => hint(h, ''));
-  if (c.cf) verificaCf('k-cf', 'k-cf-h', false);
+  if (c.cf) verificaCf('k-cf', 'k-cf-h', (c.tipo || 'SC') === 'PF' ? 'vuoti' : false);
   $('#cl-titolo').textContent = SCHEDA.nuovo ? 'Nuovo cliente' : nomeCli(c);
   $('#k-elimina').hidden = !!SCHEDA.nuovo; $('#k-elimina').textContent = 'Elimina dall’anagrafica'; delete $('#k-elimina').dataset.conf;
   $('#cl-attiva').hidden = !!SCHEDA.nuovo; $('#cl-attiva').textContent = c.id === ATTIVO ? 'Cliente attivo ✓' : 'Imposta come cliente attivo';
