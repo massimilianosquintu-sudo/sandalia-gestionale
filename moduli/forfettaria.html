@@ -336,7 +336,7 @@ select.conto{display:block;margin-top:6px;max-width:260px;font-size:13px;padding
         <div class="drop" id="drop" tabindex="0" role="button" aria-label="Seleziona i file da caricare">
           <strong>Trascina qui fatture emesse e ricevute e corrispettivi</strong>
           <span class="hint">oppure fai clic per sceglierli dal computer</span>
-          <div class="formats"><span>XML</span><span>P7M</span><span>ZIP portale AdE</span><span>PDF</span><span>JPG · PNG</span><span>CSV</span><span>Excel Profis</span></div>
+          <div class="formats"><span>XML</span><span>P7M</span><span>ZIP portale AdE</span><span>PDF</span><span>JPG · PNG</span><span>CSV</span><span>Excel Profis · Blustring</span></div>
         </div>
         <input type="file" id="file-in" multiple hidden accept=".xml,.p7m,.zip,.pdf,.jpg,.jpeg,.png,.webp,.csv,.txt,.xlsx,.xls">
         <label class="check" for="opt-auto"><input type="checkbox" id="opt-auto" checked><span>Registra subito le fatture XML lette senza anomalie. Gli altri documenti restano da verificare.</span></label>
@@ -635,7 +635,7 @@ function suggerisciConto(testo, att) {
   if (/prestazion|consulenz|onorari|compens|parcella|sostituzion/.test(t)) return att === "professione" ? "compensi" : "altri";
   return att === "professione" ? "altri" : "acquisti";
 }
-const FONTI = { xml: "XML", agente: "Agente AI", manuale: "Manuale", profis: "Profis" };
+const FONTI = { xml: "XML", agente: "Agente AI", manuale: "Manuale", profis: "Profis", blustring: "Blustring" };
 
 const S = {
   db: null, sample: null, downloads: null, mode: "attesa",
@@ -1304,11 +1304,99 @@ async function importaRegistriIva(name, R) {
   log(name, `Registri IVA di Profis: ${docs.size} documenti (vendite ${profisN(tot.vendite)} €, acquisti ${profisN(tot.acquisti)} €${tot.corrispettivi ? `, corrispettivi ${profisN(tot.corrispettivi)} €` : ""}). ${trovati ? `${trovati} già presenti dal libro giornale o nel registro${diffImp ? `, ${diffImp} con importo diverso da controllare` : ", importi coincidenti"}` : "Nessuno dal libro giornale"}${nuove.length ? `; ${nuove.length} da aggiungere${trovati ? "" : ": senza il libro giornale lo stato di incasso va verificato"}` : ""}.`, diffImp || (nuove.length && trovati) ? "err" : "ok");
   if (nuove.length) await proponi(nuove);
 }
+/* ---------- registri IVA integrati esportati da Blustring (registriintegrati.xls) ----------
+   Intestazione: idregistro, periodoliquid, dataregh, idsoggetto, infodettaglio, [dataregistrazione], deskrigo, importodare, importoavere, altreinfo, …
+   Per ogni documento una riga di testata (controparte e "fattura N del gg/mm/aaaa, registrata il gg/mm/aaaa") seguita dalle righe IVA e di costo;
+   per i corrispettivi una riga "Incasso corrispettivi" con il totale incassato, seguita da IVA e ricavo.
+   Regime forfettario: l'IVA sugli acquisti è indetraibile e fa parte del costo; i corrispettivi si registrano IVA inclusa. */
+function bluRiconosci(righe) {
+  for (let i = 0; i < Math.min(righe.length, 5); i++) {
+    const h = (righe[i] || []).map(x => String(x ?? "").trim().toLowerCase());
+    if (h.includes("idregistro") && h.includes("deskrigo") && h.includes("importoavere")) {
+      const c = k => h.indexOf(k);
+      return { riga: i, desc: c("deskrigo"), dare: c("importodare"), avere: c("importoavere"), info: c("altreinfo"), dataReg: c("dataregistrazione"), id: c("idregistro") };
+    }
+  }
+  return null;
+}
+const BLU_CONTI = [[/merci|materie prime|materi[ae] di consumo|materiale di consumo|beni per la produzione|piccola attrezzatura|imballagg|semilavorat|trasporti su acquisti/i, "acquisti"],
+  [/lavorazion/i, "lavorazioni"], [/fitti|affitt|locazion|noleggi|leasing|canoni|godimento beni/i, "beni_terzi"], [/carburant|lubrificant/i, "carburanti"],
+  [/telefon/i, "telefonia"], [/energia|elettric/i, "energia"]];
+function bluConto(desc, tAtt) {
+  for (const [re, k] of BLU_CONTI) if (re.test(desc)) return k;
+  if (/prestazion|consulenz|compens|collaboraz/i.test(desc)) return tAtt === "professione" ? "compensi" : "altri";
+  return "altri";
+}
+const bluData = s => { const m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(String(s || "")); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+function bluSerial(v) {
+  if (typeof v === "number" && v > 30000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5); return d.toISOString().slice(0, 10); }
+  return bluData(v) || (/^\d{4}-\d{2}-\d{2}/.test(String(v || "")) ? String(v).slice(0, 10) : "");
+}
+async function importaBlustring(name, righe, col) {
+  const c = clienteCorrente(), tAtt = tipoAtt(c);
+  const num = v => typeof v === "number" ? v : profisNum(v);
+  const docs = [], corr = []; let sez = 0, cur = null, periodo = "";
+  for (let i = col.riga + 1; i < righe.length; i++) {
+    const r = righe[i] || [], desc = String(r[col.desc] ?? "").trim(), info = String(r[col.info] ?? "").trim();
+    const dare = num(r[col.dare]), avere = num(r[col.avere]);
+    if (typeof r[col.id] === "number" && !desc) { sez = r[col.id]; cur = null; continue; }
+    const pl = r.find(x => /PERIODO DI LIQUIDAZIONE/i.test(String(x || ""))); if (pl) { periodo = String(pl).replace(/.*:\s*/, ""); continue; }
+    if (!desc) continue;
+    const testata = /^(.*?)\s+(\S.*?)\s+del\s+(\d{2}\/\d{2}\/\d{4}),\s*registrata il\s+(\d{2}\/\d{2}\/\d{4})/i.exec(info);
+    if (testata) {
+      const cf = /(?:P\.\s*IVA|C\.\s*F\.)\s*:?\s*([A-Z0-9]+)/i.exec(desc);
+      cur = { sez, tipoDoc: testata[1].toLowerCase(), numero: testata[2].trim(), data: bluData(testata[3]), reg: bluData(testata[4]),
+        cp: desc.replace(/\s+-\s+(P\.\s*IVA|C\.\s*F\.).*$/i, "").trim(), cf: cf ? cf[1].toUpperCase() : "", tot: r2(Math.abs(avere - dare)), segnoTot: avere - dare, iva: 0, righe: [], vendita: false };
+      docs.push(cur); continue;
+    }
+    if (/^incasso corrispettivi/i.test(desc)) {
+      cur = { data: bluSerial(col.dataReg >= 0 ? r[col.dataReg] : null) || bluData(info), tot: r2(dare - avere), iva: 0, imp: 0 };
+      corr.push(cur); continue;
+    }
+    if (!cur) continue;
+    if (/^iva\b/i.test(desc)) { cur.iva = r2(cur.iva + Math.abs(dare - avere)); if (/vendit/i.test(desc) && cur.righe) cur.vendita = true; continue; }
+    if (cur.righe) cur.righe.push({ desc, imp: r2(dare - avere) }); else cur.imp = r2(cur.imp + avere - dare);
+  }
+  const voci = []; let totAcq = 0, ivaAcq = 0, totCorr = 0, ivaCorr = 0, nAcq = 0, nVen = 0, precedenti = 0;
+  for (const d of docs) {
+    const nc = /nota|credito/.test(d.tipoDoc) || (d.sez !== 2 && d.segnoTot < 0 && !d.vendita);
+    const vendita = d.vendita || d.sez === 2 || d.righe.some(x => x.imp < 0 && /ricav|vendit/i.test(x.desc));
+    if (vendita) {
+      const imp = Math.abs(r2(d.righe.filter(x => !/bollo/i.test(x.desc)).reduce((t, x) => t + x.imp, 0))) || d.tot;
+      voci.push(nuovaVoce({ tipo: nc ? "nota_credito" : "fattura", data: d.data, numero: d.numero, controparte: d.cp, controparteCf: d.cf, imponibile: imp, fonte: "blustring", file: name, confidenza: "alta",
+        note: `Blustring: ${d.tipoDoc} registrata il ${itDate(d.reg)}: incasso da verificare` }));
+      nVen++; continue;
+    }
+    const costo = d.righe.slice().sort((a, b) => Math.abs(b.imp) - Math.abs(a.imp))[0];
+    const conto = costo ? bluConto(costo.desc, tAtt) : suggerisciConto(d.cp, tAtt);
+    const v = nuovaVoce({ tipo: nc ? "nc_ricevuta" : "fattura_ricevuta", data: d.data, numero: d.numero, controparte: d.cp, controparteCf: d.cf, imponibile: d.tot,
+      incassato: true, dataIncasso: d.reg, fonte: "blustring", file: name, confidenza: "alta", conto, contoDa: "blustring",
+      note: `Blustring: ${d.tipoDoc} registrata il ${itDate(d.reg)}, data di registrazione assunta come data di pagamento${d.iva ? ` · IVA indetraibile di ${profisN(d.iva)} € compresa nel costo` : ""}${costo ? ` · conto ${costo.desc}` : ""}` });
+    voci.push(v); nAcq++; totAcq = r2(totAcq + (nc ? -d.tot : d.tot)); ivaAcq = r2(ivaAcq + d.iva);
+    if (d.data.slice(0, 4) < d.reg.slice(0, 4)) precedenti++;
+  }
+  let quadra = 0;
+  for (const k of corr) {
+    if (!(k.tot > 0)) continue;
+    if (Math.abs(r2(k.imp + k.iva) - k.tot) >= 0.01) quadra++;
+    voci.push(nuovaVoce({ tipo: "corrispettivo", data: k.data, controparte: "Corrispettivi giornalieri", imponibile: k.tot, iva: k.iva, fonte: "blustring", file: name, confidenza: "alta",
+      note: `Blustring: corrispettivi del giorno, importo comprensivo di IVA${k.iva ? ` (IVA ${profisN(k.iva)} €)` : ""}` }));
+    totCorr = r2(totCorr + k.tot); ivaCorr = r2(ivaCorr + k.iva);
+  }
+  const parti = [];
+  if (nAcq) parti.push(`${nAcq} fatture ricevute per ${profisN(totAcq)} € IVA indetraibile compresa${ivaAcq ? ` (di cui IVA ${profisN(ivaAcq)} €)` : ""}${precedenti ? `, ${precedenti === 1 ? "1 datata nell'anno precedente e registrata" : `${precedenti} datate nell'anno precedente e registrate`} nell'anno` : ""}`);
+  if (nVen) parti.push(`${nVen} fatture emesse`);
+  if (corr.length) parti.push(`${corr.length} corrispettivi per ${profisN(totCorr)} € IVA inclusa${ivaCorr ? ` (di cui IVA ${profisN(ivaCorr)} €)` : ""}`);
+  log(name, `Registri integrati di Blustring${periodo ? ` (${periodo})` : ""}: ${parti.join("; ") || "nessun documento"}${quadra ? `; ${quadra} corrispettivi con ricavo e IVA che non quadrano con l'incasso` : ""}.`, parti.length && !quadra ? "ok" : "err");
+  if (voci.length) await proponi(voci);
+}
 async function leggiExcel(name, blob) {
   await caricaLib("xlsx");
   const wb = window.XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: "array", cellDates: false });
   for (const sn of wb.SheetNames) {
     const righe = window.XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
+    const blu = bluRiconosci(righe);
+    if (blu) return { tipo: "registri", run: () => importaBlustring(name, righe, blu) };
     const col = profisRiconosci(righe);
     if (col) return { tipo: "giornale", run: () => importaProfis(name, righe, col) };
     const R = profisRegistriIva(righe);
