@@ -299,11 +299,11 @@ select.conto{display:block;margin-top:6px;max-width:260px;font-size:13px;padding
         <div class="drop" id="drop" tabindex="0" role="button" aria-label="Seleziona i file da caricare">
           <strong>Trascina qui fatture emesse e ricevute e corrispettivi</strong>
           <span class="hint">oppure fai clic per sceglierli dal computer</span>
-          <div class="formats"><span>XML</span><span>P7M</span><span>ZIP portale AdE</span><span>PDF</span><span>JPG · PNG</span><span>CSV</span></div>
+          <div class="formats"><span>XML</span><span>P7M</span><span>ZIP portale AdE</span><span>PDF</span><span>JPG · PNG</span><span>CSV</span><span>Excel Profis</span></div>
         </div>
-        <input type="file" id="file-in" multiple hidden accept=".xml,.p7m,.zip,.pdf,.jpg,.jpeg,.png,.webp,.csv,.txt">
+        <input type="file" id="file-in" multiple hidden accept=".xml,.p7m,.zip,.pdf,.jpg,.jpeg,.png,.webp,.csv,.txt,.xlsx,.xls">
         <label class="check" for="opt-auto"><input type="checkbox" id="opt-auto" checked><span>Registra subito le fatture XML lette senza anomalie. Gli altri documenti restano da verificare.</span></label>
-        <p class="note">Fatture XML, P7M e ZIP vengono lette in modo esatto dal tracciato: l'app riconosce da sola se la fattura è emessa o ricevuta. Le fatture ricevute si registrano subito solo quando il fornitore ha già un conto di utilizzo abituale. PDF, foto e CSV vengono interpretati dall'agente AI.</p>
+        <p class="note">Fatture XML, P7M e ZIP vengono lette in modo esatto dal tracciato: l'app riconosce da sola se la fattura è emessa o ricevuta. Le fatture ricevute si registrano subito solo quando il fornitore ha già un conto di utilizzo abituale. PDF, foto e CSV vengono interpretati dall'agente AI. Il libro giornale esportato da Profis in Excel si importa in modo esatto: fatture, note di credito, incassi e pagamenti, attività dai centri di imputazione.</p>
       </div>
       <div class="card" id="card-agente">
         <h2>Agente di registrazione</h2>
@@ -598,7 +598,7 @@ function suggerisciConto(testo, att) {
   if (/prestazion|consulenz|onorari|compens|parcella|sostituzion/.test(t)) return att === "professione" ? "compensi" : "altri";
   return att === "professione" ? "altri" : "acquisti";
 }
-const FONTI = { xml: "XML", agente: "Agente AI", manuale: "Manuale" };
+const FONTI = { xml: "XML", agente: "Agente AI", manuale: "Manuale", profis: "Profis" };
 
 const S = {
   db: null, sample: null, downloads: null, mode: "attesa",
@@ -1035,7 +1035,8 @@ async function gestisciXml(name, text) {
 
 const LIBS = {
   jszip: ["https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"],
-  pdf: ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js", "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"]
+  pdf: ["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js", "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"],
+  xlsx: ["https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"]
 };
 const caricate = {};
 function script(src) { return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("Componente di lettura non disponibile")); document.head.appendChild(s); }); }
@@ -1061,7 +1062,7 @@ async function gestisciPdf(name, blob) {
 }
 async function gestisciFile(files) {
   if (!clienteCorrente()) { log("File", "Crea prima un cliente nella scheda Cliente", "err"); return; }
-  const immagini = [];
+  const immagini = [], excel = [];
   const uno = async (name, blob) => {
     const low = name.toLowerCase();
     try {
@@ -1082,10 +1083,13 @@ async function gestisciFile(files) {
       if (low.endsWith(".pdf")) return gestisciPdf(name, blob);
       if (/\.(jpe?g|png|webp|gif)$/.test(low)) { immagini.push([name, blob]); return; }
       if (/\.(csv|txt)$/.test(low)) return agenteTesto(name, await blob.text());
+      if (/\.(xlsx|xls)$/.test(low)) { excel.push(await leggiExcel(name, blob)); return; }
       log(name, "Formato non gestito", "err");
     } catch (e) { log(name, e && e.message ? e.message : "Lettura non riuscita", "err"); }
   };
   for (const f of files) await uno(f.name, f);
+  const ordine = { giornale: 0, registri: 1, altro: 2 };
+  for (const x of excel.sort((a, b) => ordine[a.tipo] - ordine[b.tipo])) { try { await x.run(); } catch (e) { log("Excel", e && e.message ? e.message : "Lettura non riuscita", "err"); } }
   if (immagini.length) {
     if (!S.imgLimits) { immagini.forEach(([n]) => log(n, "In questa vista l'agente non può leggere immagini", "err")); return; }
     const k = Math.max(1, S.imgLimits.maxCount);
@@ -1095,6 +1099,183 @@ async function gestisciFile(files) {
     }
   }
 }
+
+/* ---------- importazione dal libro giornale di Profis (esportazione Excel) ----------
+   Colonne: Riferimenti documento completi, Causale contabile, Data registrazione, Codice Centro Imputazione,
+   Codice conto formattato, Codice partitario, Descrizione conto/partitario, Causale contabile sostitutiva righe, Importo Dare/Avere.
+   Fatture e note di credito diventano registrazioni; gli incassi e i pagamenti in prima nota le segnano come incassate o pagate
+   (per cassa). Gli incassi di fatture di anni precedenti diventano registrazioni del documento originario, incassate nell'anno. */
+const PROFIS_CONTI = [[/^55\./, "acquisti"], [/^57\.01\./, "lavorazioni"], [/^65\./, "beni_terzi"], [/^59\.0[13]\.0[1-9]$|carburant/i, "carburanti"], [/^57\.09\.0[35]|telefon/i, "telefonia"], [/^57\.09\.1[13]|energia/i, "energia"]];
+function profisConto(codice, descr, att) {
+  for (const [re, k] of PROFIS_CONTI) if (re.test(codice) || re.test(descr)) return k;
+  return suggerisciConto(descr, att);
+}
+const profisN = v => (Number(v) || 0).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const profisNum = v => typeof v === "number" ? v : Number(String(v || "").replace(/\./g, "").replace(",", ".")) || 0;
+function profisData(v) {
+  if (v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+  if (typeof v === "number" && v > 20000) { const d = new Date(Math.round((v - 25569) * 864e5)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`; }
+  const m = String(v || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  return m ? `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+}
+// "Ft FFOTO1/2026  9/01/26" → { sigla: "FT", numero: "FFOTO1/2026", data: "2026-01-09" }
+function profisRif(t) {
+  const m = String(t || "").match(/\b(Ft|Nc|Fa|Fd|Pa|Nd|Fv|Ac)\.?\s+(.+?)\s+(\d{1,2}\/\d{1,2}\/\d{2,4})\b/i);
+  return m ? { sigla: m[1].toUpperCase(), numero: m[2].trim(), data: profisData(m[3]) } : null;
+}
+function profisRifTutti(t) {
+  return [...String(t || "").matchAll(/\b(Ft|Nc|Fa|Fd|Pa|Nd|Fv|Ac)\.?\s+(.+?)\s+(\d{1,2}\/\d{1,2}\/\d{2,4})\b/gi)].map(m => ({ sigla: m[1].toUpperCase(), numero: m[2].replace(/^[,;\s]+/, "").trim(), data: profisData(m[3]) }));
+}
+function profisRiconosci(righe) {
+  const h = (righe[0] || []).map(x => String(x || "").trim().toLowerCase());
+  const i = n => h.findIndex(x => x.startsWith(n));
+  const col = { rif: i("riferimenti documento"), caus: i("causale contabile"), data: i("data registrazione"), centro: i("codice centro"), num: i("numero"), tipo: i("tipo registrazione"), conto: i("codice conto"), part: i("codice partitario"), desc: i("descrizione conto"), sost: i("causale contabile sostitutiva"), dare: i("importo dare"), avere: i("importo avere") };
+  return col.conto >= 0 && col.dare >= 0 && col.avere >= 0 && col.data >= 0 && col.desc >= 0 ? col : null;
+}
+function profisRegistrazioni(righe, col) {
+  const regs = []; let cur = null;
+  for (const r of righe.slice(1)) {
+    if (!r || !r.some(x => x !== null && x !== undefined && x !== "")) continue;
+    const data = profisData(r[col.data]);
+    if (data) { cur = { data, rif: String(r[col.rif] ?? "").trim(), caus: String(r[col.caus] ?? "").trim(), tipo: String(r[col.tipo] ?? "").trim(), num: String(r[col.num] ?? ""), righe: [] }; regs.push(cur); }
+    if (!cur) continue;
+    cur.righe.push({ centro: String(r[col.centro] ?? "0").trim() || "0", conto: String(r[col.conto] ?? "").trim(), part: String(r[col.part] ?? "0").trim(), desc: String(r[col.desc] ?? "").trim(), sost: String(r[col.sost] ?? "").trim(), dare: r2(profisNum(r[col.dare])), avere: r2(profisNum(r[col.avere])) });
+  }
+  return regs;
+}
+async function importaProfis(name, righe, col) {
+  const c = clienteCorrente(), atts = attivitaCliente(c), tAtt = tipoAtt(c);
+  const regs = profisRegistrazioni(righe, col);
+  const isPart = x => x.part && x.part !== "0";
+  const isCli = x => isPart(x) && /^11\./.test(x.conto), isFor = x => isPart(x) && /^(33|31)\./.test(x.conto);
+  const isFin = x => /^19\./.test(x.conto) || /^(35|37)\./.test(x.conto) && !isPart(x);
+  const isBollo = x => /bollo/i.test(x.desc);
+  // centri di imputazione → attività del cliente
+  const centri = new Map();
+  for (const g of regs) for (const x of g.righe) if (x.centro !== "0" && /^(4|5)\d\./.test(x.conto) && !isPart(x)) { const e = centri.get(x.centro) || { desc: new Set() }; e.desc.add(x.desc); centri.set(x.centro, e); }
+  const mappa = {}, liberi = atts.map(a => a.id);
+  for (const [k, e] of [...centri].sort()) { const g = atts.length > 1 ? indovinaAtt([...e.desc].join(" "), atts) : "P"; if (g) { mappa[k] = { att: g, da: "descrizione" }; liberi.splice(liberi.indexOf(g), 1); } }
+  for (const [k] of [...centri].sort()) if (!mappa[k]) { const a = liberi.shift() || "P"; mappa[k] = { att: a, da: "ordine" }; }
+  const attDiCentro = k => (mappa[k] || { att: "P" }).att;
+  const docs = new Map(), voci = [], incassi = [], scarti = [];
+  const chiaveRif = (sigla, numero, data, tipoCp) => `${tipoCp}|${sigla === "NC" ? "NC" : "FT"}|${String(numero).replace(/\s+/g, "").toUpperCase()}|${data}`;
+  for (const g of regs) {
+    const cp = g.righe.find(x => isPart(x)), caus = g.caus.toLowerCase();
+    const vendita = /vendita|emess/.test(caus) || /^(2|3)\d\d-/.test(g.tipo), acquisto = /acquist|ricevut/.test(caus) || /^\d{1,2}-ft/i.test(g.tipo);
+    const nc = /nota (di )?credito/.test(caus) || /^3\d\d-|nc\./i.test(g.tipo);
+    if ((vendita || acquisto) && cp && g.rif) {
+      const rif = profisRif(g.rif) || { sigla: nc ? "NC" : "FT", numero: g.rif, data: g.data };
+      const ricavi = g.righe.filter(x => !isPart(x) && !isFin(x) && !isBollo(x));
+      const segnoRiga = x => vendita ? (nc ? x.dare - x.avere : x.avere - x.dare) : (nc ? x.avere - x.dare : x.dare - x.avere);
+      const quote = new Map();
+      for (const x of ricavi) { const a = attDiCentro(x.centro); quote.set(a, r2((quote.get(a) || 0) + segnoRiga(x))); }
+      const imp = r2([...quote.values()].reduce((t, v) => t + v, 0));
+      const bollo = r2(g.righe.filter(isBollo).reduce((t, x) => t + Math.abs(x.avere - x.dare), 0));
+      const totale = r2(Math.abs(cp.dare - cp.avere));
+      const tipo = vendita ? (nc ? "nota_credito" : "fattura") : (nc ? "nc_ricevuta" : "fattura_ricevuta");
+      const costo = ricavi.slice().sort((a, b) => Math.abs(b.dare - b.avere) - Math.abs(a.dare - a.avere))[0];
+      const att0 = [...quote.keys()][0] || "P";
+      const o = { tipo, data: rif.data || g.data, numero: rif.numero, controparte: cp.desc, imponibile: Math.abs(imp), bollo, incassato: false, fonte: "profis", file: name, confidenza: "certa",
+        att: att0, attDa: "profis", conto: acquisto && costo ? profisConto(costo.conto, costo.desc + " " + cp.desc, tAtt) : "", contoDa: acquisto ? "profis" : "",
+        note: `Profis: ${g.caus} ${rif.sigla} ${rif.numero}, registrata il ${itDate(g.data)}${acquisto && costo ? ` · conto ${costo.conto} ${costo.desc}` : ""}` };
+      const v = nuovaVoce(o);
+      if (quote.size > 1) v.ripart = [...quote].map(([att, imp]) => ({ att, imp: Math.abs(imp) }));
+      if (atts.length > 1 && [...quote.keys()].some(a => Object.entries(mappa).some(([k, m]) => m.att === a && m.da === "ordine"))) v.anomalie.push("Attività da confermare");
+      v.profisTot = totale; v.profisPagato = 0; v.profisUltimo = "";
+      docs.set(chiaveRif(rif.sigla, rif.numero, rif.data, vendita ? "C" : "F"), v); voci.push(v);
+    } else if (cp && g.righe.some(isFin)) {
+      // incasso o pagamento in prima nota: una riga di partitario per documento
+      for (const x of g.righe.filter(isPart)) incassi.push({ g, x, cli: isCli(x), imp: r2(Math.abs(x.dare - x.avere)), segno: isCli(x) ? (x.avere - x.dare >= 0 ? 1 : -1) : (x.dare - x.avere >= 0 ? 1 : -1) });
+    } else scarti.push(g);
+  }
+  let abb = 0, prec = 0, senzaRif = 0;
+  for (const p of incassi) {
+    let refs = profisRifTutti(p.x.sost);
+    if (!refs.length) refs = profisRifTutti(p.g.righe.map(y => y.sost).join(" "));
+    if (!refs.length) { senzaRif++; continue; }
+    // un movimento può saldare più documenti: l'importo si ripartisce sul residuo di ciascuno
+    let resto = p.imp; const mancanti = [], trovati = [];
+    for (const rf of refs) {
+      const v = docs.get(chiaveRif(rf.sigla, rf.numero, rf.data, p.cli ? "C" : "F"));
+      if (!v) { mancanti.push(rf); continue; }
+      trovati.push(v);
+      const q = refs.length === 1 ? resto : Math.min(resto, r2(v.profisTot - v.profisPagato));
+      if (q <= 0) continue;
+      v.profisPagato = r2(v.profisPagato + q); resto = r2(resto - q); if (p.g.data > v.profisUltimo) v.profisUltimo = p.g.data; abb++;
+    }
+    if (resto > 0.005 && !mancanti.length && trovati.length) { trovati[0].profisPagato = r2(trovati[0].profisPagato + resto); resto = 0; }
+    if (resto <= 0.005 || !mancanti.length) continue;
+    const rif = mancanti[0]; p.imp = resto;
+    // documento di un anno precedente (o non presente nel giornale): si registra per l'importo incassato
+    const nc = rif.sigla === "NC", tipo = p.cli ? (nc ? "nota_credito" : "fattura") : (nc ? "nc_ricevuta" : "fattura_ricevuta");
+    const att = attDiCentro(p.x.centro), costo = !p.cli;
+    const w = nuovaVoce({ tipo, data: rif.data, numero: rif.numero, controparte: p.x.desc, imponibile: p.imp, incassato: true, dataIncasso: p.g.data, fonte: "profis", file: name, confidenza: "alta",
+      att, attDa: "profis", conto: costo ? suggerisciConto(p.x.desc, tAtt) : "", contoDa: costo ? "suggerito" : "",
+      note: `Profis: ${p.cli ? "incasso" : "pagamento"} del ${itDate(p.g.data)} di un documento non presente nel giornale (${rif.sigla} ${rif.numero} del ${itDate(rif.data)}): registrato per l'importo ${p.cli ? "incassato" : "pagato"}` });
+    if (rif.data && rif.data.slice(0, 4) < p.g.data.slice(0, 4)) prec++;
+    docs.set(chiaveRif(rif.sigla, rif.numero, rif.data, p.cli ? "C" : "F"), w); w.profisTot = p.imp; w.profisPagato = p.imp; w.profisUltimo = p.g.data; voci.push(w);
+  }
+  let parz = 0;
+  for (const v of voci) {
+    if (v.profisPagato >= v.profisTot - 0.01 && v.profisPagato > 0) { v.incassato = true; v.dataIncasso = v.profisUltimo; }
+    else if (v.profisPagato > 0) { v.incassato = false; v.dataIncasso = ""; v.anomalie.push(`Incassata in parte: ${profisN(v.profisPagato)} su ${profisN(v.profisTot)}`); parz++; }
+    else { v.incassato = false; v.dataIncasso = ""; }
+    delete v.profisTot; delete v.profisPagato; delete v.profisUltimo;
+  }
+  const fatt = voci.filter(v => v.tipo === "fattura").length, ncv = voci.filter(v => v.tipo === "nota_credito").length, ric = voci.filter(v => isCosto(v.tipo)).length;
+  log(name, `Libro giornale di Profis: ${regs.length} registrazioni → ${fatt} fatture, ${ncv} note di credito, ${ric} documenti ricevuti; ${abb} incassi e pagamenti abbinati${prec ? `, ${prec} documenti di anni precedenti incassati nell'anno` : ""}${parz ? `, ${parz} incassati in parte` : ""}${senzaRif ? `, ${senzaRif} movimenti senza riferimento al documento` : ""}${scarti.length ? `, ${scarti.length} registrazioni non rilevanti per il regime forfettario` : ""}.`, "ok");
+  if (atts.length > 1 && centri.size) log(name, `Centri di imputazione: ${[...centri].sort().map(([k, e]) => `${k} (${[...e.desc][0]}) → ${etAtt(atts.find(a => a.id === mappa[k].att))}${mappa[k].da === "ordine" ? " da confermare" : ""}`).join(" · ")}`, Object.values(mappa).some(m => m.da === "ordine") ? "err" : "ok");
+  else if (centri.size > 1) log(name, `Il giornale distingue ${centri.size} attività (centri di imputazione), ma nella scheda Cliente ne è indicata una sola: aggiungi le altre attività per tenere distinti i ricavi`, "err");
+  await proponi(voci);
+}
+/* registri IVA esportati da Profis (senza intestazione): ditta, nome, anno, attività IVA, descrizione, registro (Vendite/Acquisti/Corrispettivi),
+   sezionale, data registrazione, protocollo, …, periodo, riferimento documento, codice e nome controparte, codice IVA, descrizione, imponibile, imposta, totale */
+function profisRegistriIva(righe) {
+  const R = righe.filter(r => r && /^(vendite|acquisti|corrispettivi)$/i.test(String(r[5] || "").trim()) && (profisRif(r[11]) || /corrispettiv/i.test(String(r[5]))));
+  return R.length >= Math.max(1, righe.filter(r => r && r.some(x => x !== null && x !== "")).length * 0.6) ? R : null;
+}
+async function importaRegistriIva(name, R) {
+  const c = clienteCorrente(), atts = attivitaCliente(c), tAtt = tipoAtt(c);
+  const docs = new Map();
+  for (const r of R) {
+    const reg = String(r[5]).trim().toLowerCase(), rif = profisRif(r[11]) || { sigla: "CO", numero: "", data: profisData(r[7]) };
+    const k = `${reg}|${r[6]}|${r[8]}|${r[11] || r[7]}`;
+    const d = docs.get(k) || { reg, sez: String(r[6] ?? ""), rif, data: profisData(r[7]), cp: String(r[13] || "").trim(), imp: 0, iva: 0, tot: profisNum(r[18]), att: String(r[4] || "") };
+    d.imp = r2(d.imp + profisNum(r[16])); d.iva = r2(d.iva + profisNum(r[17])); docs.set(k, d);
+  }
+  const sezV = [...new Set([...docs.values()].filter(d => d.reg === "vendite").map(d => d.sez))].sort();
+  const attSez = {}; sezV.forEach((z, i) => { attSez[z] = atts[i] ? atts[i].id : "P"; });
+  const kDoc = (t, num, data) => `${t}|${String(num).replace(/\s+/g, "").toUpperCase()}|${data}`;
+  const presenti = new Map([...S.coda, ...S.regs].map(v => [kDoc(v.tipo, v.numero, v.data), v]));
+  const nuove = [], tot = { vendite: 0, acquisti: 0, corrispettivi: 0 }; let trovati = 0, diffImp = 0;
+  for (const d of docs.values()) {
+    const nc = d.rif.sigla === "NC" || d.imp < 0, costo = d.reg === "acquisti";
+    const tipo = d.reg === "corrispettivi" ? "corrispettivo" : costo ? (nc ? "nc_ricevuta" : "fattura_ricevuta") : (nc ? "nota_credito" : "fattura");
+    const imp = Math.abs(costo ? (d.tot || r2(d.imp + d.iva)) : d.imp);
+    tot[d.reg] = r2(tot[d.reg] + (nc ? -imp : imp));
+    const g = presenti.get(kDoc(tipo, d.rif.numero, d.rif.data));
+    if (g) { trovati++; if (Math.abs(Math.abs(g.imponibile) - imp) >= 0.01) diffImp++; continue; }
+    nuove.push(nuovaVoce({ tipo, data: d.rif.data || d.data, numero: d.rif.numero, controparte: d.cp, imponibile: imp, iva: costo ? 0 : Math.abs(d.iva), fonte: "profis", file: name, confidenza: "alta",
+      att: costo ? "P" : (attSez[d.sez] || "P"), attDa: "profis", conto: costo ? suggerisciConto(d.cp, tAtt) : "", contoDa: costo ? "suggerito" : "",
+      note: `Profis, registro IVA ${d.reg} (sezionale ${d.sez}, protocollo del ${itDate(d.data)}): incasso da verificare con il libro giornale` }));
+  }
+  if (atts.length > 1 && sezV.length > 1) for (const v of nuove) if (!isCosto(v.tipo)) v.anomalie.push("Attività da confermare");
+  log(name, `Registri IVA di Profis: ${docs.size} documenti (vendite ${profisN(tot.vendite)} €, acquisti ${profisN(tot.acquisti)} €${tot.corrispettivi ? `, corrispettivi ${profisN(tot.corrispettivi)} €` : ""}). ${trovati ? `${trovati} già presenti dal libro giornale o nel registro${diffImp ? `, ${diffImp} con importo diverso da controllare` : ", importi coincidenti"}` : "Nessuno dal libro giornale"}${nuove.length ? `; ${nuove.length} da aggiungere${trovati ? "" : ": senza il libro giornale lo stato di incasso va verificato"}` : ""}.`, diffImp || (nuove.length && trovati) ? "err" : "ok");
+  if (nuove.length) await proponi(nuove);
+}
+async function leggiExcel(name, blob) {
+  await caricaLib("xlsx");
+  const wb = window.XLSX.read(new Uint8Array(await blob.arrayBuffer()), { type: "array", cellDates: false });
+  for (const sn of wb.SheetNames) {
+    const righe = window.XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
+    const col = profisRiconosci(righe);
+    if (col) return { tipo: "giornale", run: () => importaProfis(name, righe, col) };
+    const R = profisRegistriIva(righe);
+    if (R) return { tipo: "registri", run: () => importaRegistriIva(name, R) };
+  }
+  return { tipo: "altro", run: () => agenteTesto(name, wb.SheetNames.map(sn => window.XLSX.utils.sheet_to_csv(wb.Sheets[sn], { FS: ";" })).join("\n")) };
+}
+async function gestisciExcel(name, blob) { return (await leggiExcel(name, blob)).run(); }
 
 /* ---------- agente AI ---------- */
 function promptBase(fonte) {
