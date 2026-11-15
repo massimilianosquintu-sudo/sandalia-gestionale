@@ -1,7 +1,8 @@
 # Agente AI del portale – proxy "claude-proxy"
 
-Nel portale l'agente AI (Contabilità forfettaria, semplificata, ordinaria e Bilancio XBRL) non usa più
-una chiave API salvata nel browser: passa dalla Edge Function `claude-proxy` del progetto Supabase
+Nel portale l'agente AI (Contabilità forfettaria, semplificata, ordinaria, Bilancio XBRL e lettura dei
+PDF nel Previsionale) non usa più una chiave API salvata nel browser: passa dalla Edge Function
+`Claude-proxy` del progetto Supabase
 dello Studio, che custodisce la chiave nei propri secrets.
 
 ```
@@ -39,7 +40,7 @@ Solo chi ha effettuato l'accesso al cloud dal portale ed è iscritto in `sandali
 select * from claude_consumi_mensili;   -- richieste e token per mese, operatore e modello
 ```
 Il campo `modulo` di `claude_log` indica da quale app è partita la richiesta
-(forfettaria, semplificata, ordinaria, bilancio-xbrl).
+(forfettaria, semplificata, ordinaria, bilancio-xbrl, previsionale).
 
 ## Messaggi di errore nel portale
 
