@@ -24,7 +24,7 @@ Dentro Claude l'agente continua a usare la capacità integrata, come prima.
    - facoltativi: `ALLOWED_EMAILS` (filtro in più rispetto ai membri), `ALLOWED_MODELS`,
      `DEFAULT_MODEL`, `MAX_TOKENS_CAP` (predefinito 16000), `LOG_USAGE` (predefinito true)
 4. **Pubblica la funzione** – Supabase → Edge Functions → *Deploy a new function* → *Via editor*,
-   nome `claude-proxy`, incolla `supabase/functions/claude-proxy/index.ts`.
+   nome `Claude-proxy` (con la C maiuscola: è il nome usato dal portale), incolla `supabase/functions/claude-proxy/index.ts`.
    Da terminale: `supabase functions deploy claude-proxy`.
 5. **Prova** – nel portale, accedi al cloud, apri un modulo → scheda dell'agente → *Prova la connessione*.
 
