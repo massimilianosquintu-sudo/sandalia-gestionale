@@ -381,6 +381,140 @@ details.notes summary{cursor:pointer;font-weight:600;font-family:var(--f-display
 </div>
 
 <script>
+/* ======================= Agente AI tramite il proxy dello Studio (fuori da Claude) =======================
+   Dentro Claude l'agente usa la capacità integrata. Nel portale usa la Edge Function "claude-proxy" del progetto
+   Supabase dello Studio: la chiave API di Anthropic resta nei secrets di Supabase e non arriva mai nel browser.
+   Serve l'accesso al cloud dal portale (utente iscritto in sandalia_membri).
+   Stessa interfaccia della capacità integrata: sample(input, opts), sample.json(input, opts), sample.limits(). */
+window.ClaudeAPI = (function () {
+  "use strict";
+  const KEY = "sandalia-api-claude-v1";
+  const FUNZIONE = "Claude-proxy"; // nome con cui la funzione è pubblicata su Supabase (maiuscole e minuscole contano)
+  const MODELLI = [
+    ["claude-sonnet-5-5", "Claude Sonnet 5.5 · consigliato (qualità e costo equilibrati)"],
+    ["claude-haiku-5-5", "Claude Haiku 5.5 · più veloce ed economico"],
+    ["claude-opus-5-5", "Claude Opus 5.5 · massima precisione, costo più alto"]
+  ];
+  const VERSIONI = ["2023-06-01", "2026-10-21"];
+  const MODULO = (() => { try { return (location.pathname.split("/").pop() || "").replace(/\.html?$/i, "") || "portale"; } catch (e) { return "portale"; } })();
+  const leggi = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } };
+  const scrivi = o => { try { localStorage.setItem(KEY, JSON.stringify(o)); return true; } catch (e) { return false; } };
+  const conf = () => { const c = leggi(); return { model: c.model || MODELLI[0][0], ver: c.ver || VERSIONI[0] }; };
+
+  /* la vecchia chiave salvata nel browser non serve più: si cancella */
+  (function () { const o = leggi(); if (o.key) { delete o.key; scrivi(o); } })();
+
+  /* collegamento al cloud del portale (finestra principale o pagina stessa) */
+  function cloud() {
+    const fonti = [];
+    try { if (window.PORTALE_HOST) fonti.push(window.PORTALE_HOST); } catch (e) {}
+    try { if (window.parent && window.parent !== window) fonti.push(window.parent); } catch (e) {}
+    fonti.push(window);
+    for (const w of fonti) { try { if (w.SANDALIA_CLOUD) return w.SANDALIA_CLOUD; } catch (e) {} }
+    return null;
+  }
+  const attivo = () => { const c = cloud(); try { return !!(c && c.token && c.stato() === "cloud" && c.conf().url && c.conf().key); } catch (e) { return false; } };
+
+  const b64 = blob => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => ko(r.error); r.readAsDataURL(blob); });
+  async function contenuto(testo, images) {
+    const parti = [];
+    for (const im of images || []) {
+      const t = /^image\/(png|jpeg|gif|webp)$/.test(im.type) ? im.type : "image/png";
+      parti.push({ type: "image", source: { type: "base64", media_type: t, data: await b64(im) } });
+    }
+    parti.push({ type: "text", text: String(testo) });
+    return parti;
+  }
+  function errore(stato, corpo) {
+    const m = (corpo && corpo.error && corpo.error.message) || "";
+    const proxy = !!(corpo && corpo.error && corpo.error.type === "proxy_error");
+    const e = new Error(
+      stato === 401 && proxy ? "Sessione del cloud scaduta: accedi di nuovo all'archivio dello Studio dal portale." :
+      stato === 403 && proxy ? `Agente non disponibile per questo utente: ${m || "accesso negato"}.` :
+      stato === 404 ? "Il proxy dell'agente non è ancora pubblicato nel progetto Supabase (funzione «claude-proxy»)." :
+      stato === 500 && proxy ? `Proxy non configurato: ${m}` :
+      stato === 401 ? "La chiave API del proxy non è valida o è stata revocata: aggiornala nei secrets di Supabase." :
+      stato === 403 ? "La chiave del proxy non ha accesso a questo modello o al workspace." :
+      stato === 429 ? "Limite di richieste o di spesa raggiunto: riprova tra poco o alza il limite nella Console." :
+      stato === 529 || stato === 503 ? "Servizio momentaneamente sovraccarico: riprova tra qualche istante." :
+      stato === 413 ? "Allegati troppo grandi per una sola richiesta: riduci il numero o la dimensione delle immagini." :
+      stato === 400 && /credit|balance/i.test(m) ? "Credito API esaurito: ricarica dalla pagina Billing della Console." :
+      `Errore dell'agente (${stato})${m ? ": " + m : ""}`);
+    e.code = stato === 401 || stato === 403 ? "not_granted" : stato === 429 ? "rate_limited" : "api_error"; e.status = stato; e.apiMessage = m;
+    return e;
+  }
+  async function chiama(input, opts = {}, maxTokens = 8192) {
+    const cl = cloud();
+    if (!attivo()) { const e = new Error("Agente non collegato: accedi al cloud dello Studio dal portale."); e.code = "not_granted"; throw e; }
+    let messages;
+    if (Array.isArray(input)) { messages = []; for (let i = 0; i < input.length; i++) { const m = input[i], ultimo = i === input.length - 1; messages.push({ role: m.role, content: ultimo && m.role === "user" ? await contenuto(m.content, opts.images) : String(m.content) }); } }
+    else messages = [{ role: "user", content: await contenuto(input, opts.images) }];
+    const c = conf(), body = JSON.stringify({ model: c.model, max_tokens: maxTokens, messages, modulo: MODULO });
+    let ver = c.ver, rinnovata = false;
+    for (let tent = 0; tent < 4; tent++) {
+      const sb = cl.conf(); let r;
+      try {
+        r = await fetch(`${sb.url}/functions/v1/${FUNZIONE}`, { method: "POST", signal: opts.signal,
+          headers: { "content-type": "application/json", "apikey": sb.key, "authorization": `Bearer ${await cl.token(rinnovata)}`, "anthropic-version": ver }, body });
+      } catch (e) { if (e && e.name === "AbortError") throw e; const er = new Error("Connessione al proxy non riuscita: controlla la rete e che la funzione «claude-proxy» sia pubblicata."); er.code = "network"; throw er; }
+      let j = null; try { j = await r.json(); } catch (e) {}
+      if (r.ok) {
+        const text = ((j && j.content) || []).filter(p => p.type === "text").map(p => p.text).join("");
+        if (opts.onText) try { opts.onText({ text, delta: text }); } catch (e) {}
+        return { text, truncated: j.stop_reason === "max_tokens", usage: j.usage, model: j.model };
+      }
+      const proxy = !!(j && j.error && j.error.type === "proxy_error");
+      if (r.status === 401 && proxy && !rinnovata) { rinnovata = true; continue; }
+      if (r.status === 400 && !proxy && /anthropic-version|version/i.test((j && j.error && j.error.message) || "") && ver !== VERSIONI[1]) { ver = VERSIONI[1]; const cc = leggi(); cc.ver = ver; scrivi(cc); continue; }
+      if ((r.status === 529 || r.status === 503) && tent < 3) { await new Promise(ok => setTimeout(ok, 1500 * (tent + 1))); continue; }
+      throw errore(r.status, j);
+    }
+    throw errore(529, null);
+  }
+  function estraiJson(t) {
+    let s = String(t || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+    try { return JSON.parse(s); } catch (e) {}
+    const a = s.search(/[\[{]/); if (a < 0) throw new Error("Risposta dell'agente senza dati JSON");
+    const ch = s[a], chiusa = ch === "{" ? "}" : "]", b = s.lastIndexOf(chiusa);
+    return JSON.parse(s.slice(a, b + 1));
+  }
+  function sample() {
+    if (!attivo()) return null;
+    const fn = (input, opts) => chiama(input, opts || {});
+    fn.json = async (input, opts) => { const istr = "\n\nRispondi esclusivamente con JSON valido, senza testo prima o dopo e senza blocchi di codice."; const inp = Array.isArray(input) ? input.map((m, i) => i === input.length - 1 ? { ...m, content: m.content + istr } : m) : String(input) + istr; return estraiJson((await chiama(inp, opts || {})).text); };
+    fn.limits = async () => ({ images: { maxCount: 20, maxBytes: 5 * 1024 * 1024 } });
+    fn.viaApi = true;
+    return fn;
+  }
+  async function prova() { const t0 = Date.now(); const r = await chiama("Rispondi soltanto con la parola OK.", {}, 16); return { ok: /ok/i.test(r.text), ms: Date.now() - t0, model: r.model }; }
+
+  /* pannello delle impostazioni, costruito con le classi già presenti nell'app */
+  function pannello(el, dentroClaude, onChange) {
+    const c = conf(), on = attivo(), esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    el.innerHTML = `<div class="row"><h2>Agente AI · collegamento tramite il proxy dello Studio</h2><span class="spacer"></span><span class="chip ${dentroClaude || on ? "ok" : ""}">${dentroClaude ? "Attivo tramite Claude" : on ? "Attivo tramite il proxy" : "Non collegato"}</span></div>
+      <p class="hint">${dentroClaude ? "Questa pagina è aperta dentro Claude: l'agente usa già l'abbonamento Claude." : on ? "L'agente passa dal proxy del progetto Supabase dello Studio: la chiave API di Anthropic è custodita sul server e non è salvata su questo computer." : "Per usare l'agente accedi all'archivio nel cloud dello Studio dalla Scrivania del portale: l'agente passa dal proxy del progetto Supabase, dove è custodita la chiave API."}</p>
+      <div class="formgrid">
+        <label class="fld" for="api-model">Modello<select id="api-model">${MODELLI.map(([v, t]) => `<option value="${v}"${v === c.model ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+      </div>
+      <div class="row"><button type="button" class="btn small pri" id="api-salva">Salva</button><button type="button" class="btn small" id="api-prova"${on ? "" : " disabled"}>Prova la connessione</button><span class="hint" id="api-msg" role="status"></span></div>
+      <p class="note">I consumi sono registrati per operatore e per modulo nella tabella claude_log del progetto Supabase. Il limite di spesa mensile si imposta nella Console Anthropic (platform.claude.com → Limits).</p>`;
+    const msg = el.querySelector("#api-msg");
+    el.querySelector("#api-salva").addEventListener("click", () => {
+      const o = leggi(); o.model = el.querySelector("#api-model").value;
+      if (!scrivi(o)) { msg.textContent = "Il browser non consente di salvare la scelta (navigazione privata?)."; return; }
+      pannello(el, dentroClaude, onChange); el.querySelector("#api-msg").textContent = "Modello aggiornato.";
+      if (onChange) onChange();
+    });
+    el.querySelector("#api-prova").addEventListener("click", async () => {
+      msg.textContent = "Verifica in corso…";
+      try { const r = await prova(); msg.textContent = r.ok ? `Collegamento riuscito con ${r.model} in ${(r.ms / 1000).toFixed(1)} s.` : "Il proxy ha risposto in modo inatteso."; }
+      catch (e) { msg.textContent = e.message || String(e); }
+    });
+  }
+  return { sample, attivo, pannello, prova, MODELLI };
+})();
+</script>
+<script>
 (function(){var P=null;try{if(window.parent&&window.parent!==window&&window.parent.PORTALE)P=window.parent}catch(e){}window.PORTALE_HOST=P;if(!P)return;try{if(P.claude&&P.claude.use){window.claude={use:function(n){return P.suiteUse(n,"prev")}}}}catch(e){}document.addEventListener("keydown",function(e){if(e.altKey&&!e.ctrlKey&&!e.metaKey&&/^[1-9]$/.test(e.key)){e.preventDefault();try{P.SUITE.openByIndex(+e.key-1)}catch(_){}}});})();
 // ---- Parser del conto economico (report a mastri/gruppi/sottoconti) ----
 function parseMoney(s){
@@ -1665,7 +1799,7 @@ async function pdfLines(file){
   return out;
 }
 var sampleP=null;
-function getSample(){ if(!sampleP) sampleP=(window.claude?window.claude.use('sample'):Promise.resolve(null)).catch(function(){ return null; }); return sampleP; }
+function getSample(){ if(!sampleP) sampleP=(window.claude?window.claude.use('sample'):Promise.resolve(null)).catch(function(){ return null; }); return sampleP.then(function(s){ return s || (window.ClaudeAPI ? window.ClaudeAPI.sample() : null); }); }
 async function parseWithClaude(lines){
   var sample=await getSample(); if(!sample) return null;
   var text=lines.join('\n').slice(0,160000);
