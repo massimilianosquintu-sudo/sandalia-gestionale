@@ -41,22 +41,39 @@
 @media print{body.stampa-fe *{visibility:hidden}body.stampa-fe #fe-vista,body.stampa-fe #fe-vista *{visibility:visible}body.stampa-fe #fe-vista{position:absolute;inset:0 auto auto 0;width:100%;max-height:none;border:0;box-shadow:none}body.stampa-fe .fe-head button,body.stampa-fe .fe-foot{display:none}body.stampa-fe .fe-corpo{overflow:visible}}
 </style>
 <script>
-/* ======================= Collegamento diretto all'API di Anthropic (fuori da Claude) =======================
-   Dentro Claude l'agente usa la capacità integrata; aperto come file, usa la chiave API dello Studio
-   salvata solo nel browser di questo computer. Stessa interfaccia della capacità integrata: sample(input, opts), sample.json(input, opts), sample.limits(). */
+/* ======================= Agente AI tramite il proxy dello Studio (fuori da Claude) =======================
+   Dentro Claude l'agente usa la capacità integrata. Nel portale usa la Edge Function "claude-proxy" del progetto
+   Supabase dello Studio: la chiave API di Anthropic resta nei secrets di Supabase e non arriva mai nel browser.
+   Serve l'accesso al cloud dal portale (utente iscritto in sandalia_membri).
+   Stessa interfaccia della capacità integrata: sample(input, opts), sample.json(input, opts), sample.limits(). */
 window.ClaudeAPI = (function () {
   "use strict";
   const KEY = "sandalia-api-claude-v1";
+  const FUNZIONE = "claude-proxy";
   const MODELLI = [
     ["claude-sonnet-5-5", "Claude Sonnet 5.5 · consigliato (qualità e costo equilibrati)"],
     ["claude-haiku-5-5", "Claude Haiku 5.5 · più veloce ed economico"],
     ["claude-opus-5-5", "Claude Opus 5.5 · massima precisione, costo più alto"]
   ];
   const VERSIONI = ["2023-06-01", "2026-10-21"];
+  const MODULO = (() => { try { return (location.pathname.split("/").pop() || "").replace(/\.html?$/i, "") || "portale"; } catch (e) { return "portale"; } })();
   const leggi = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } };
   const scrivi = o => { try { localStorage.setItem(KEY, JSON.stringify(o)); return true; } catch (e) { return false; } };
-  const conf = () => { const c = leggi(); return { key: String(c.key || "").trim(), model: c.model || MODELLI[0][0], ver: c.ver || VERSIONI[0] }; };
-  const attivo = () => /^sk-ant-/.test(conf().key);
+  const conf = () => { const c = leggi(); return { model: c.model || MODELLI[0][0], ver: c.ver || VERSIONI[0] }; };
+
+  /* la vecchia chiave salvata nel browser non serve più: si cancella */
+  (function () { const o = leggi(); if (o.key) { delete o.key; scrivi(o); } })();
+
+  /* collegamento al cloud del portale (finestra principale o pagina stessa) */
+  function cloud() {
+    const fonti = [];
+    try { if (window.PORTALE_HOST) fonti.push(window.PORTALE_HOST); } catch (e) {}
+    try { if (window.parent && window.parent !== window) fonti.push(window.parent); } catch (e) {}
+    fonti.push(window);
+    for (const w of fonti) { try { if (w.SANDALIA_CLOUD) return w.SANDALIA_CLOUD; } catch (e) {} }
+    return null;
+  }
+  const attivo = () => { const c = cloud(); try { return !!(c && c.token && c.stato() === "cloud" && c.conf().url && c.conf().key); } catch (e) { return false; } };
 
   const b64 = blob => new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => ko(r.error); r.readAsDataURL(blob); });
   async function contenuto(testo, images) {
@@ -70,37 +87,46 @@ window.ClaudeAPI = (function () {
   }
   function errore(stato, corpo) {
     const m = (corpo && corpo.error && corpo.error.message) || "";
+    const proxy = !!(corpo && corpo.error && corpo.error.type === "proxy_error");
     const e = new Error(
-      stato === 401 ? "Chiave API non valida o revocata: controllala nella Console Anthropic." :
-      stato === 403 ? "La chiave non ha accesso a questo modello o al workspace." :
+      stato === 401 && proxy ? "Sessione del cloud scaduta: accedi di nuovo all'archivio dello Studio dal portale." :
+      stato === 403 && proxy ? `Agente non disponibile per questo utente: ${m || "accesso negato"}.` :
+      stato === 404 ? "Il proxy dell'agente non è ancora pubblicato nel progetto Supabase (funzione «claude-proxy»)." :
+      stato === 500 && proxy ? `Proxy non configurato: ${m}` :
+      stato === 401 ? "La chiave API del proxy non è valida o è stata revocata: aggiornala nei secrets di Supabase." :
+      stato === 403 ? "La chiave del proxy non ha accesso a questo modello o al workspace." :
       stato === 429 ? "Limite di richieste o di spesa raggiunto: riprova tra poco o alza il limite nella Console." :
       stato === 529 || stato === 503 ? "Servizio momentaneamente sovraccarico: riprova tra qualche istante." :
+      stato === 413 ? "Allegati troppo grandi per una sola richiesta: riduci il numero o la dimensione delle immagini." :
       stato === 400 && /credit|balance/i.test(m) ? "Credito API esaurito: ricarica dalla pagina Billing della Console." :
-      `Errore dell'API (${stato})${m ? ": " + m : ""}`);
+      `Errore dell'agente (${stato})${m ? ": " + m : ""}`);
     e.code = stato === 401 || stato === 403 ? "not_granted" : stato === 429 ? "rate_limited" : "api_error"; e.status = stato; e.apiMessage = m;
     return e;
   }
   async function chiama(input, opts = {}, maxTokens = 8192) {
-    const c = conf(); if (!/^sk-ant-/.test(c.key)) { const e = new Error("Chiave API non impostata"); e.code = "not_granted"; throw e; }
+    const cl = cloud();
+    if (!attivo()) { const e = new Error("Agente non collegato: accedi al cloud dello Studio dal portale."); e.code = "not_granted"; throw e; }
     let messages;
     if (Array.isArray(input)) { messages = []; for (let i = 0; i < input.length; i++) { const m = input[i], ultimo = i === input.length - 1; messages.push({ role: m.role, content: ultimo && m.role === "user" ? await contenuto(m.content, opts.images) : String(m.content) }); } }
     else messages = [{ role: "user", content: await contenuto(input, opts.images) }];
-    const body = { model: c.model, max_tokens: maxTokens, messages };
-    let ver = c.ver;
-    for (let tent = 0; tent < 3; tent++) {
-      let r;
+    const c = conf(), body = JSON.stringify({ model: c.model, max_tokens: maxTokens, messages, modulo: MODULO });
+    let ver = c.ver, rinnovata = false;
+    for (let tent = 0; tent < 4; tent++) {
+      const sb = cl.conf(); let r;
       try {
-        r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal: opts.signal,
-          headers: { "content-type": "application/json", "x-api-key": c.key, "anthropic-version": ver, "anthropic-dangerous-direct-browser-access": "true" }, body: JSON.stringify(body) });
-      } catch (e) { if (e && e.name === "AbortError") throw e; const er = new Error("Connessione all'API non riuscita: controlla la rete (in alcune viste protette le chiamate esterne sono bloccate)."); er.code = "network"; throw er; }
+        r = await fetch(`${sb.url}/functions/v1/${FUNZIONE}`, { method: "POST", signal: opts.signal,
+          headers: { "content-type": "application/json", "apikey": sb.key, "authorization": `Bearer ${await cl.token(rinnovata)}`, "anthropic-version": ver }, body });
+      } catch (e) { if (e && e.name === "AbortError") throw e; const er = new Error("Connessione al proxy non riuscita: controlla la rete e che la funzione «claude-proxy» sia pubblicata."); er.code = "network"; throw er; }
       let j = null; try { j = await r.json(); } catch (e) {}
       if (r.ok) {
-        const text = (j.content || []).filter(p => p.type === "text").map(p => p.text).join("");
+        const text = ((j && j.content) || []).filter(p => p.type === "text").map(p => p.text).join("");
         if (opts.onText) try { opts.onText({ text, delta: text }); } catch (e) {}
         return { text, truncated: j.stop_reason === "max_tokens", usage: j.usage, model: j.model };
       }
-      if (r.status === 400 && /anthropic-version|version/i.test((j && j.error && j.error.message) || "") && ver !== VERSIONI[1]) { ver = VERSIONI[1]; const cc = leggi(); cc.ver = ver; scrivi(cc); continue; }
-      if ((r.status === 529 || r.status === 503) && tent < 2) { await new Promise(ok => setTimeout(ok, 1500 * (tent + 1))); continue; }
+      const proxy = !!(j && j.error && j.error.type === "proxy_error");
+      if (r.status === 401 && proxy && !rinnovata) { rinnovata = true; continue; }
+      if (r.status === 400 && !proxy && /anthropic-version|version/i.test((j && j.error && j.error.message) || "") && ver !== VERSIONI[1]) { ver = VERSIONI[1]; const cc = leggi(); cc.ver = ver; scrivi(cc); continue; }
+      if ((r.status === 529 || r.status === 503) && tent < 3) { await new Promise(ok => setTimeout(ok, 1500 * (tent + 1))); continue; }
       throw errore(r.status, j);
     }
     throw errore(529, null);
@@ -124,33 +150,25 @@ window.ClaudeAPI = (function () {
 
   /* pannello delle impostazioni, costruito con le classi già presenti nell'app */
   function pannello(el, dentroClaude, onChange) {
-    const c = conf(), esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-    const mask = c.key ? c.key.slice(0, 10) + "…" + c.key.slice(-4) : "";
-    el.innerHTML = `<div class="row"><h2>Agente AI · collegamento all'API di Anthropic</h2><span class="spacer"></span><span class="chip ${dentroClaude ? "ok" : attivo() ? "ok" : ""}">${dentroClaude ? "Attivo tramite Claude" : attivo() ? "Attivo tramite API" : "Non collegato"}</span></div>
-      <p class="hint">${dentroClaude ? "Questa pagina è aperta dentro Claude: l'agente usa già l'abbonamento Claude e la chiave non serve. Puoi comunque salvarla qui per quando apri il file dal computer." : "Fuori da Claude l'agente usa la chiave API dello Studio. La chiave resta salvata solo nel browser di questo computer e non viene inviata a nessun altro che ad Anthropic."}</p>
+    const c = conf(), on = attivo(), esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    el.innerHTML = `<div class="row"><h2>Agente AI · collegamento tramite il proxy dello Studio</h2><span class="spacer"></span><span class="chip ${dentroClaude || on ? "ok" : ""}">${dentroClaude ? "Attivo tramite Claude" : on ? "Attivo tramite il proxy" : "Non collegato"}</span></div>
+      <p class="hint">${dentroClaude ? "Questa pagina è aperta dentro Claude: l'agente usa già l'abbonamento Claude." : on ? "L'agente passa dal proxy del progetto Supabase dello Studio: la chiave API di Anthropic è custodita sul server e non è salvata su questo computer." : "Per usare l'agente accedi all'archivio nel cloud dello Studio dalla Scrivania del portale: l'agente passa dal proxy del progetto Supabase, dove è custodita la chiave API."}</p>
       <div class="formgrid">
-        <label class="fld wide" for="api-key">Chiave API${mask ? ` <span class="mono">(salvata: ${esc(mask)})</span>` : ""}<input id="api-key" type="password" class="mono" autocomplete="off" spellcheck="false" placeholder="${mask ? "Lascia vuoto per mantenere la chiave salvata" : "sk-ant-…"}"></label>
         <label class="fld" for="api-model">Modello<select id="api-model">${MODELLI.map(([v, t]) => `<option value="${v}"${v === c.model ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
       </div>
-      <div class="row"><button type="button" class="btn small pri" id="api-salva">Salva</button><button type="button" class="btn small" id="api-prova"${c.key ? "" : " disabled"}>Prova la connessione</button><button type="button" class="btn small danger" id="api-togli"${c.key ? "" : " disabled"}>Rimuovi la chiave</button><span class="hint" id="api-msg" role="status"></span></div>
-      <p class="note">La chiave si crea nella Console Anthropic (platform.claude.com → API Keys) e si paga a consumo, separatamente dall'abbonamento Claude. Imposta un limite di spesa mensile in Billing e usa un workspace dedicato. Non inserire la chiave su computer condivisi con persone esterne allo Studio e non inviare mai a terzi un file in cui l'hai salvata: la chiave resta nel browser, non nel file.</p>`;
+      <div class="row"><button type="button" class="btn small pri" id="api-salva">Salva</button><button type="button" class="btn small" id="api-prova"${on ? "" : " disabled"}>Prova la connessione</button><span class="hint" id="api-msg" role="status"></span></div>
+      <p class="note">I consumi sono registrati per operatore e per modulo nella tabella claude_log del progetto Supabase. Il limite di spesa mensile si imposta nella Console Anthropic (platform.claude.com → Limits).</p>`;
     const msg = el.querySelector("#api-msg");
     el.querySelector("#api-salva").addEventListener("click", () => {
-      const k = el.querySelector("#api-key").value.trim(), o = leggi();
-      if (k && !/^sk-ant-[\w-]{20,}$/.test(k)) { msg.textContent = "La chiave deve iniziare con «sk-ant-»: copiala per intero dalla Console."; return; }
-      if (k) o.key = k; o.model = el.querySelector("#api-model").value;
-      if (!scrivi(o)) { msg.textContent = "Il browser non consente di salvare la chiave (navigazione privata?)."; return; }
-      pannello(el, dentroClaude, onChange); el.querySelector("#api-msg").textContent = k ? "Chiave salvata: premi «Prova la connessione»." : "Modello aggiornato.";
+      const o = leggi(); o.model = el.querySelector("#api-model").value;
+      if (!scrivi(o)) { msg.textContent = "Il browser non consente di salvare la scelta (navigazione privata?)."; return; }
+      pannello(el, dentroClaude, onChange); el.querySelector("#api-msg").textContent = "Modello aggiornato.";
       if (onChange) onChange();
     });
     el.querySelector("#api-prova").addEventListener("click", async () => {
       msg.textContent = "Verifica in corso…";
-      try { const r = await prova(); msg.textContent = r.ok ? `Collegamento riuscito con ${r.model} in ${(r.ms / 1000).toFixed(1)} s.` : "L'API ha risposto in modo inatteso."; }
+      try { const r = await prova(); msg.textContent = r.ok ? `Collegamento riuscito con ${r.model} in ${(r.ms / 1000).toFixed(1)} s.` : "Il proxy ha risposto in modo inatteso."; }
       catch (e) { msg.textContent = e.message || String(e); }
-    });
-    el.querySelector("#api-togli").addEventListener("click", ev => {
-      const b = ev.currentTarget; if (!b.dataset.c) { b.dataset.c = "1"; b.textContent = "Conferma la rimozione"; return; }
-      const o = leggi(); delete o.key; scrivi(o); pannello(el, dentroClaude, onChange); el.querySelector("#api-msg").textContent = "Chiave rimossa da questo browser."; if (onChange) onChange();
     });
   }
   return { sample, attivo, pannello, prova, MODELLI };

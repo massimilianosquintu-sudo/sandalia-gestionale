@@ -693,7 +693,8 @@ const ATECO_CORR="01.11.00:01.11.10,01.11.20,01.11.30,01.11.40;01.12.00:01.12.00
   }
   /* il portale legge window.claude all'avvio: il database è quello di Supabase, l'agente e i download restano quelli del file */
   window.claude = { use: async n => { if (n !== 'db') return null; if (!pronto) pronto = avvia(); return pronto; } };
-  window.SANDALIA_CLOUD = { stato: () => stato, conf, esci };
+  /* token(forza): token di sessione valido, rinnovato se scaduto (usato dall'agente AI per il proxy claude-proxy) */
+  window.SANDALIA_CLOUD = { stato: () => stato, conf, esci, token: async forza => { if (forza && sess) sess.scade = 0; return token(); }, email: () => sess?.email || conf().email || '' };
 
   /* scheda nella Scrivania, sotto la nota sull'archivio */
   function scheda() {
