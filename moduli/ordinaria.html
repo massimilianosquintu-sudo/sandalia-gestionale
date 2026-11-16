@@ -271,6 +271,7 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
       <button class="tab" role="tab" data-tab="pag" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="1.5"/><circle cx="9" cy="12" r="2.2"/><path d="M5.8 17a3.4 3.4 0 0 1 6.4 0"/><path d="M14 11h4M14 14h3"/></svg><span class="lbl">Paghe</span></button>
       <div class="side-grp">Adempimenti</div>
       <button class="tab" role="tab" data-tab="iva" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><circle cx="7.5" cy="7.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/></svg><span class="lbl">IVA</span></button>
+      <button class="tab" role="tab" data-tab="riv" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 9h16M4 14h16M9 9v11"/></svg><span class="lbl">Registri IVA</span></button>
       <button class="tab" role="tab" data-tab="f24" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span class="lbl">F24</span></button>
       <button class="tab" role="tab" data-tab="ces" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M6 20V9l6-5 6 5v11"/><path d="M10 20v-6h4v6"/></svg><span class="lbl">Cespiti</span></button>
       <button class="tab" role="tab" data-tab="chi" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="1.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v2"/></svg><span class="lbl">Chiusura</span></button>
@@ -609,21 +610,33 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
       <p class="hint" id="lipe-msg" role="status"></p>
       <p class="note">File conforme alle specifiche IVP18 dell'Agenzia delle Entrate. Puoi caricarlo su Fatture e Corrispettivi oppure trasmetterlo con Entratel dopo il controllo; per verificarlo, stamparlo o completarlo prima dell'invio aprilo nella web app LIPE della Suite Dichiarazioni con "Importa XML".</p>
     </div>
-    <div class="card">
-      <div class="row"><h2>Registri IVA</h2><span class="spacer"></span>
+  </section>
+
+  <!-- REGISTRI IVA -->
+  <section class="panel" id="tab-riv" hidden>
+    <div class="card" id="riv-card">
+      <div class="row"><h2 id="riv-titolo">Registro IVA vendite</h2><span class="spacer"></span>
         <label class="fld" for="iva-per">Periodo<select id="iva-per"></select></label>
+        <label class="fld" for="riv-cerca">Cerca<input id="riv-cerca" placeholder="Numero, protocollo o nominativo" autocomplete="off"></label>
         <div class="seg" role="group" aria-label="Registro"><button type="button" data-reg="V" aria-pressed="true">Vendite</button><button type="button" data-reg="A" aria-pressed="false">Acquisti</button><button type="button" data-reg="C" aria-pressed="false">Corrispettivi</button></div>
       </div>
-      <div class="tbl-wrap"><table>
+      <p class="hint" id="riv-msg" role="status"></p>
+      <div class="tbl-wrap"><table class="riv">
         <thead id="regiva-head"></thead>
         <tbody id="regiva-body"></tbody>
         <tfoot id="regiva-foot"></tfoot>
       </table></div>
+      <p class="note">Il protocollo è progressivo per registro e anno, in ordine di data di registrazione; le integrazioni e autofatture (TD16, TD17, TD18, TD19 e reverse charge interno) hanno nel registro delle vendite un sezionale proprio (1/AF, 2/AF…). Puoi scrivere un protocollo diverso: i successivi ripartono da quello. «Modifica» apre la registrazione in prima nota, con le righe del registro IVA.</p>
       <h3>Riepilogo per codice IVA</h3>
       <div class="tbl-wrap"><table>
         <thead><tr><th>Codice IVA</th><th class="num">Imponibile</th><th class="num">Imposta</th><th class="num">di cui detraibile</th></tr></thead>
         <tbody id="riep-iva-body"></tbody>
       </table></div>
+      <style>
+        .riv input.prot{width:78px;font-family:var(--mono,monospace);padding:3px 6px}
+        .riv input.prot.auto{color:var(--muted,#667);border-style:dashed}
+        .riv td .pill{margin-left:4px}
+      </style>
     </div>
   </section>
 
@@ -1820,9 +1833,9 @@ const afN = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
 const afTag = (t, v, max) => v === "" || v == null ? "" : `<${t}>${afX(max ? String(v).slice(0, max) : v)}</${t}>`;
 /* identificativo IVA estero: senza prefisso del Paese; se manca (fornitore extra UE) un codice convenzionale */
 function afVat(paese, vat) {
-  let v = String(vat || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const p = String(paese || "").toUpperCase();
-  if (v.startsWith(p)) v = v.slice(p.length);
+  let v = String(vat || "").toUpperCase().replace(/\b(MWST|TVA|IVA|VAT|UID|EIN|TIN|TAX|ABN|GST|NO|NR)\b\.?/g, " ").replace(/[^A-Z0-9]/g, "");
+  if (p === "CH" && v.startsWith("CHE")) v = v.slice(3); else if (v.startsWith(p)) v = v.slice(p.length);
   if (p === "GR" && v.startsWith("EL")) v = v.slice(2);
   return v.slice(0, 28) || "99999999999";
 }
@@ -2295,7 +2308,8 @@ const PAGINE = {
   ces: ["Adempimenti", "Cespiti", "Registro dei beni ammortizzabili con piano di ammortamento e scrittura delle quote al 31 dicembre."],
   chi: ["Adempimenti", "Chiusura dell'esercizio", "Assestamento (ammortamenti, ratei e risconti, rimanenze, imposte), chiusura dei conti e riapertura al 1° gennaio."],
   cas: ["Adempimenti", "Reddito per cassa", "Ricavi incassati e costi pagati dell'esercizio, registro degli incassi e dei pagamenti e prospetto del quadro RG."],
-  iva: ["Adempimenti", "IVA", "Registri, riepiloghi per codice IVA e liquidazioni periodiche con i righi della LIPE."],
+  iva: ["Adempimenti", "IVA", "Liquidazioni periodiche con i righi della LIPE e comunicazione telematica."],
+  riv: ["Adempimenti", "Registri IVA", "Registri delle vendite, degli acquisti e dei corrispettivi con numero di protocollo, per verificare e modificare le registrazioni."],
   dic: ["Adempimenti", "Dichiarazioni", "File per la Suite Dichiarazioni: Redditi, IRAP e IVA compilati dalla contabilità dell'esercizio."],
   bil: ["Adempimenti", "Bilancio", "Bilancio di verifica, mastrini e prospetto CEE provvisorio."],
   rip: ["Impostazioni", "Ripresa saldi", "Saldi e partite aperte dell'azienda che arriva da un altro programma, registrati come apertura o ripresa in corso d'anno."],
@@ -2307,11 +2321,11 @@ function apriTab(t) {
   const [ey, ti, le] = PAGINE[t] || ["", "", ""];
   $("#pg-eyebrow").textContent = ey; $("#pg-title").textContent = ti; $("#pg-lead").textContent = le;
   $$(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["acq", "pn", "par", "sca", "ban", "pag", "iva", "f24", "cas", "ces", "chi", "bil", "dic", "pdc", "rip", "az"].forEach(k => $("#tab-" + k).hidden = k !== t);
+  ["acq", "pn", "par", "sca", "ban", "pag", "iva", "riv", "f24", "cas", "ces", "chi", "bil", "dic", "pdc", "rip", "az"].forEach(k => $("#tab-" + k).hidden = k !== t);
   renderTab();
 }
 function renderTab() {
-  if (S.tab === "pn") renderPN(); else if (S.tab === "par") renderPar(); else if (S.tab === "iva") { renderIVA(); renderLipe(); }
+  if (S.tab === "pn") renderPN(); else if (S.tab === "par") renderPar(); else if (S.tab === "iva") { renderIVA(); renderLipe(); } else if (S.tab === "riv") renderRegIva();
   else if (S.tab === "bil") renderBil(); else if (S.tab === "pdc") renderPdc(); else if (S.tab === "rip") { renderRip(); renderBlu(); } else if (S.tab === "dic") renderDic(); else if (S.tab === "sca") renderSca(); else if (S.tab === "ban") renderBan(); else if (S.tab === "pag") renderPaghe(); else if (S.tab === "f24") renderF24(); else if (S.tab === "cas") renderCassa(); else if (S.tab === "ces") renderCespiti(); else if (S.tab === "chi") renderChiusura();
 }
 function renderAcqKpi() {
@@ -2696,21 +2710,6 @@ function renderIVA() {
     <td class="num">${[l.vp7 ? `+${num(l.vp7)} debito prec.` : "", l.vp8 ? `−${num(l.vp8)} credito prec.` : "", l.vp9 ? `−${num(l.vp9)} credito anno prec.` : "", l.vp13 ? `−${num(l.vp13)} acconto` : ""].filter(Boolean).join("<br>") || "–"}</td>
     <td class="num">${l.vp12 ? num(l.vp12) : "–"}</td><td class="num">${l.versare ? num(l.versare) : "–"}</td><td class="num">${l.credito ? num(l.credito) : "–"}</td>
     <td>${l.versare ? `<span class="mono">${l.cod}</span> entro il ${l.scad}` : l.riporto ? `Riportato (≤ ${num(sogliaIva(S.anno))} €)` : "–"}</td></tr>`).join("");
-  const sel = $("#iva-per"), cur = sel.value;
-  sel.innerHTML = periodi(az).map(p => `<option value="${p}">${nomePeriodo(az, p)}</option>`).join("");
-  sel.value = periodi(az).includes(Number(cur)) ? cur : String(S.anno === new Date().getFullYear() ? periodoDi(az, today()) : 1);
-  const P = Number(sel.value), R = S.regMode;
-  $$(".seg button[data-reg]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.reg === R)));
-  const righe = [];
-  for (const r of S.regs) { if (periodoDi(az, r.dataReg) !== P) continue; for (const v of r.iva || []) if (v.reg === R) righe.push({ r, v }); }
-  righe.sort((a, b) => (a.r.dataReg + a.r.numDoc).localeCompare(b.r.dataReg + b.r.numDoc));
-  $("#regiva-head").innerHTML = `<tr><th>Data reg.</th><th>Documento</th><th>${R === "A" ? "Fornitore" : R === "V" ? "Cliente" : "Descrizione"}</th><th>Codice IVA</th><th class="num">Imponibile</th><th class="num">Imposta</th>${R === "A" ? `<th class="num">Detraibile</th>` : ""}</tr>`;
-  $("#regiva-body").innerHTML = righe.length ? righe.map(({ r, v }) => `<tr><td>${itDate(r.dataReg)}</td><td class="mono">${esc(r.numDoc || "")}${r.dataDoc ? `<div class="sub">${itDate(r.dataDoc)}</div>` : ""}</td><td>${esc(r.anagNome || r.descr || "")}${v.rc ? ` <span class="pill media">RC</span>` : ""}${v.esig === "S" ? ` <span class="pill media">split</span>` : ""}</td><td>${esc(v.cod)}<div class="sub">${esc(codIvaLabel(v.cod))}</div></td><td class="num">${num(v.imp)}</td><td class="num">${num(v.iva)}</td>${R === "A" ? `<td class="num">${num(v.detr)}</td>` : ""}</tr>`).join("")
-    : `<tr><td colspan="7" class="empty">Nessuna operazione nel periodo.</td></tr>`;
-  const sum = k => r2(righe.reduce((s, x) => s + (x.v[k] || 0), 0));
-  $("#regiva-foot").innerHTML = righe.length ? `<tr><td colspan="4">Totale</td><td class="num">${num(sum("imp"))}</td><td class="num">${num(sum("iva"))}</td>${R === "A" ? `<td class="num">${num(sum("detr"))}</td>` : ""}</tr>` : "";
-  const per = new Map(); for (const { v } of righe) { const e = per.get(v.cod) || { imp: 0, iva: 0, detr: 0 }; e.imp += v.imp; e.iva += v.iva; e.detr += v.detr || 0; per.set(v.cod, e); }
-  $("#riep-iva-body").innerHTML = per.size ? [...per].sort().map(([c, e]) => `<tr><td>${esc(c)} · ${esc(codIvaLabel(c))}</td><td class="num">${num(e.imp)}</td><td class="num">${num(e.iva)}</td><td class="num">${R === "A" ? num(e.detr) : "–"}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">–</td></tr>`;
 }
 
 /* ---------- bilancio ---------- */
@@ -6441,7 +6440,7 @@ function prfLeggiRegistri(righe) {
     if (!r || !/^(acquisti|vendite|corrispettivi)$/i.test(String(r[5]).trim())) continue;
     const reg = /^v/i.test(r[5]) ? "V" : /^a/i.test(r[5]) ? "A" : "C";
     const k = `${reg}|${Number(r[12]) || 0}|${prfNorm(r[11])}`;
-    const x = m.get(k) || { reg, an: Number(r[12]) || 0, nome: String(r[13] || ""), ref: prfNorm(r[11]), tot: r2(prfNum(r[18])), righe: [] };
+    const x = m.get(k) || { reg, an: Number(r[12]) || 0, nome: String(r[13] || ""), ref: prfNorm(r[11]), tot: r2(prfNum(r[18])), prot: String(r[8] ?? "").trim(), sez: Number(r[6]) || 1, righe: [] };
     x.righe.push({ cod: String(r[14] || "").trim(), desc: String(r[15] || "").trim(), imp: r2(prfNum(r[16])), iva: r2(prfNum(r[17])), detr: r2(prfNum(r[23])), nota: String(r[19] || "") });
     m.set(k, x);
   }
@@ -6594,6 +6593,10 @@ async function prfImporta() {
           }
           if (!ivaA && ivaInGiornale) avvisi.push(`${descr}: IVA nel giornale ma documento non trovato nei registri`);
         }
+        // protocollo dei registri IVA di Profis (sezionale diverso dal primo: n/sezionale)
+        const prA = ivaA?.prot, prV = ivaV?.prot, conSez = x => x.sez > 1 ? `${x.prot}/${x.sez}` : x.prot;
+        if ((causale === "FE" || causale === "NE") && prV) reg.prot = { V: conSez(ivaV) };
+        else if (prA && ivaA.righe.length) reg.prot = { A: conSez(ivaA) };
         if (reg.iva.length) nIva++; else if (PRF.IVA && !/fuori ambito|costi fuori/i.test(R.tdoc)) senzaIva++;
       }
       reg._R = R; regs.push(reg);
@@ -6790,6 +6793,81 @@ async function afCrea(reg, salva) {
   return out;
 }
 
+/* ---------- registri IVA: protocollo, verifica e modifica delle registrazioni ---------- */
+const RIV_NOMI = { V: "Registro IVA vendite", A: "Registro IVA acquisti", C: "Registro dei corrispettivi" };
+/* protocolli del registro per l'anno: quelli scritti a mano restano, gli altri sono progressivi per data di registrazione;
+   nel registro vendite le integrazioni e le autofatture (righe in reverse charge) hanno il sezionale AF */
+function protocolliRegistro(R) {
+  const lista = [];
+  for (const r of S.regs) { const vs = (r.iva || []).filter(v => v.reg === R); if (!vs.length) continue; lista.push({ r, sez: R === "V" && vs.every(v => v.rc) ? "AF" : "" }); }
+  lista.sort((a, b) => String(a.r.dataReg).localeCompare(String(b.r.dataReg)) || String(a.r.creato || "").localeCompare(String(b.r.creato || "")) || String(a.r.numDoc || "").localeCompare(String(b.r.numDoc || ""), "it", { numeric: true }));
+  const cnt = {}, out = new Map();
+  for (const { r, sez } of lista) {
+    const st = r.prot && r.prot[R];
+    if (st) { out.set(r.id, { p: String(st), auto: false, sez }); const m = String(st).match(/^(\d+)/); if (m) cnt[sez] = Math.max(cnt[sez] || 0, Number(m[1])); }
+    else { cnt[sez] = (cnt[sez] || 0) + 1; out.set(r.id, { p: sez ? `${cnt[sez]}/${sez}` : String(cnt[sez]), auto: true, sez }); }
+  }
+  return out;
+}
+function renderRegIva() {
+  const az = aziendaCorrente(), R = S.regMode || "V";
+  $$(".seg button[data-reg]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.reg === R)));
+  $("#riv-titolo").textContent = `${RIV_NOMI[R]} ${S.anno}`;
+  if (renderRegIva.ultimo !== R) { $("#riv-msg").textContent = ""; renderRegIva.ultimo = R; }
+  if (!az) { $("#regiva-body").innerHTML = `<tr><td class="empty">Seleziona o crea un'azienda.</td></tr>`; $("#regiva-head").innerHTML = $("#regiva-foot").innerHTML = $("#riep-iva-body").innerHTML = ""; return; }
+  const sel = $("#iva-per"), cur = sel.value;
+  sel.innerHTML = `<option value="0">Tutto l'anno</option>` + periodi(az).map(p => `<option value="${p}">${nomePeriodo(az, p)}</option>`).join("");
+  sel.value = cur && [...sel.options].some(o => o.value === cur) ? cur : "0";
+  const P = Number(sel.value), q = $("#riv-cerca").value.trim().toLowerCase(), prot = protocolliRegistro(R);
+  const righe = [];
+  for (const r of S.regs) {
+    if (P && periodoDi(az, r.dataReg) !== P) continue;
+    const vs = (r.iva || []).filter(v => v.reg === R); if (!vs.length) continue;
+    const pr = prot.get(r.id);
+    if (q && ![r.numDoc, r.anagNome, r.descr, pr?.p, r.autofattura?.numero].some(x => String(x || "").toLowerCase().includes(q))) continue;
+    vs.forEach((v, i) => righe.push({ r, v, i, n: vs.length, pr }));
+  }
+  const num1 = p => Number(String(p?.p || "").match(/^(\d+)/)?.[1] || 0);
+  righe.sort((a, b) => String(a.pr?.sez || "").localeCompare(String(b.pr?.sez || "")) || String(a.r.dataReg).localeCompare(String(b.r.dataReg)) || num1(a.pr) - num1(b.pr) || a.i - b.i);
+  const A = R === "A", cols = A ? 10 : 9;
+  $("#regiva-head").innerHTML = `<tr><th>Protocollo</th><th>Data reg.</th><th>Documento</th><th>${A ? "Fornitore" : R === "V" ? "Cliente" : "Descrizione"}</th><th>Codice IVA</th><th class="num">Imponibile</th><th class="num">Imposta</th>${A ? `<th class="num">Detraibile</th>` : ""}<th class="num">Totale</th><th></th></tr>`;
+  $("#regiva-body").innerHTML = righe.length ? righe.map(({ r, v, i, n, pr }) => {
+    const td = v.td || (v.rc ? (/^N6/.test(v.nat || v.cod) ? "TD16" : "") : "");
+    const doc = r.autofattura && v.reg === "V" && v.rc ? `${esc(r.autofattura.numero)}<div class="sub">integrazione di ${esc(r.numDoc || "")} del ${itDate(r.dataDoc)}</div>` : `${esc(r.numDoc || "")}${r.dataDoc ? `<div class="sub">del ${itDate(r.dataDoc)}</div>` : ""}`;
+    const totDoc = i === 0 ? num((r.iva || []).filter(x => x.reg === R).reduce((s, x) => s + (x.imp || 0) + (x.iva || 0), 0)) : "";
+    return `<tr data-id="${esc(r.id)}">
+      <td>${i === 0 ? `<input class="prot${pr?.auto ? " auto" : ""}" data-prot="${R}" value="${esc(pr?.p || "")}" aria-label="Protocollo nel ${RIV_NOMI[R].toLowerCase()}" title="${pr?.auto ? "Protocollo automatico: scrivine uno per fissarlo" : "Protocollo indicato a mano: cancellalo per tornare a quello automatico"}">` : ""}</td>
+      <td>${i === 0 ? itDate(r.dataReg) : ""}</td><td class="mono">${i === 0 ? doc : ""}</td>
+      <td>${i === 0 ? esc(r.anagNome || r.descr || "") : ""}${i === 0 && v.rc ? ` <span class="pill media">${td || "RC"}</span>` : ""}</td>
+      <td><span title="${esc(codIvaLabel(v.cod))}">${esc(v.cod)}</span></td>
+      <td class="num">${num(v.imp)}</td><td class="num">${num(v.iva)}</td>${A ? `<td class="num">${num(v.detr || 0)}</td>` : ""}
+      <td class="num">${totDoc}</td>
+      <td>${i === 0 ? `<div class="row" style="flex-wrap:nowrap;gap:6px">${afRegTd(r) ? `<button type="button" class="btn small" data-act="af">XML ${afRegTd(r)}</button>` : ""}<button type="button" class="btn small" data-act="mod">Modifica</button></div>` : ""}</td></tr>`;
+  }).join("") : `<tr><td colspan="${cols}" class="empty">Nessuna operazione ${P ? "nel periodo" : "nell'anno"}.</td></tr>`;
+  const sum = k => r2(righe.reduce((s, x) => s + (x.v[k] || 0), 0));
+  $("#regiva-foot").innerHTML = righe.length ? `<tr><td colspan="5">Totale · ${new Set(righe.map(x => x.r.id)).size} documenti</td><td class="num">${num(sum("imp"))}</td><td class="num">${num(sum("iva"))}</td>${A ? `<td class="num">${num(sum("detr"))}</td>` : ""}<td class="num">${num(sum("imp") + sum("iva"))}</td><td></td></tr>` : "";
+  const per = new Map(); for (const { v } of righe) { const e = per.get(v.cod) || { imp: 0, iva: 0, detr: 0 }; e.imp += v.imp; e.iva += v.iva; e.detr += v.detr || 0; per.set(v.cod, e); }
+  $("#riep-iva-body").innerHTML = per.size ? [...per].sort().map(([c, e]) => `<tr><td>${esc(c)} · ${esc(codIvaLabel(c))}</td><td class="num">${num(e.imp)}</td><td class="num">${num(e.iva)}</td><td class="num">${A ? num(e.detr) : "–"}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">Nessuna operazione.</td></tr>`;
+}
+$("#regiva-body").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const r = S.regs.find(x => x.id === b.closest("tr").dataset.id); if (!r) return;
+  if (b.dataset.act === "af") return afCrea(r, true);
+  if (b.dataset.act === "mod") { apriTab("pn"); apriEditorPN(r); }
+});
+$("#regiva-body").addEventListener("change", async e => {
+  const el = e.target.closest("input[data-prot]"); if (!el) return;
+  const r = S.regs.find(x => x.id === el.closest("tr").dataset.id); if (!r) return;
+  const R = el.dataset.prot, val = el.value.trim(), prot = { ...(r.prot || {}) };
+  if (val) prot[R] = val; else delete prot[R];
+  // protocollo già usato da un altro documento dello stesso registro
+  const usato = val && [...protocolliRegistro(R)].find(([id, p]) => id !== r.id && p.p.toUpperCase() === val.toUpperCase());
+  if (usato) { $("#riv-msg").textContent = `Il protocollo ${val} è già assegnato a un altro documento del registro: i protocolli automatici successivi si aggiornano.`; }
+  else $("#riv-msg").textContent = val ? `Protocollo ${val} salvato.` : "Protocollo automatico ripristinato.";
+  try { await store.put("registrazioni", { ...r, prot }); r.prot = prot; } catch { $("#riv-msg").textContent = "Salvataggio non riuscito: riprova."; }
+  renderRegIva();
+});
+
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
 const AZ_CAMPI = [["a-den", "denominazione"], ["a-forma", "forma"], ["a-piva", "piva"], ["a-cf", "cf", "up"], ["a-pec", "pec"], ["a-stato", "stato"], ["a-liq-data", "liqData"],
@@ -6910,8 +6988,9 @@ $("#btn-csv-pn").addEventListener("click", async () => {
   try { await S.downloads.save({ filename: name, data: csvPN() }); $("#pn-msg").textContent = `${name} salvato.`; }
   catch (e) { $("#pn-msg").textContent = e?.code === "declined" ? "Salvataggio annullato." : "Scaricamento non riuscito."; }
 });
-$$(".seg button[data-reg]").forEach(b => b.addEventListener("click", () => { S.regMode = b.dataset.reg; renderIVA(); }));
-$("#iva-per").addEventListener("change", renderIVA);
+$$(".seg button[data-reg]").forEach(b => b.addEventListener("click", () => { S.regMode = b.dataset.reg; renderRegIva(); }));
+$("#iva-per").addEventListener("change", renderRegIva);
+$("#riv-cerca").addEventListener("input", renderRegIva);
 let tIva;
 ["#in-cred-prec", "#in-acconto", "#in-metodo"].forEach(s => $(s).addEventListener(s === "#in-metodo" ? "change" : "input", () => {
   clearTimeout(tIva);
