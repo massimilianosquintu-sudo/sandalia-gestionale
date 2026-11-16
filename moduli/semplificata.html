@@ -1369,7 +1369,7 @@ const store = {
     const d = lsLoad(); d[coll] = d[coll].filter(x => x.id !== id); lsSave(d); localRefresh();
   },
   async esiste(chiave) {
-    if (tutteRegs().some(r => r.chiave === chiave)) return true;
+    if (tutteRegs().some(r => r.chiave === chiave || (r.incassi || []).some(i => i.chiave === chiave))) return true;
     if (S.db) { try { const q = await S.db.collection("registrazioni").where("aziendaId", "==", S.aziendaId).where("chiave", "==", chiave).limit(1).get(); return !q.empty; } catch { return false; } }
     return lsLoad().registrazioni.some(r => r.aziendaId === S.aziendaId && r.chiave === chiave);
   }
@@ -1439,7 +1439,7 @@ function trovaAnag(tipo, { piva, cf, nome }) {
 /* ---------- partite ---------- */
 function abbinatoA(docId, conCoda) {
   let s = 0;
-  for (const r of tutteRegs()) for (const a of (r.abbinamenti || [])) if (a.regId === docId) s += Number(a.importo) || 0;
+  for (const r of tutteRegs()) { for (const a of (r.abbinamenti || [])) if (a.regId === docId) s += Number(a.importo) || 0; if (r.id === docId) for (const i of r.incassi || []) s += Number(i.importo) || 0; }
   if (conCoda) for (const q of S.coda) for (const a of (q.reg.abbinamenti || [])) if (a.regId === docId) s += Number(a.importo) || 0;
   return r2(s);
 }
@@ -1461,6 +1461,7 @@ function erroriReg(reg) {
     else if (!contoOk(x.conto)) e.push(`Conto ${x.conto} non valido: serve un sottoconto`);
     if (isPartitario(x.conto) && !x.anagId && !x.anagNuova) e.push("Cliente o fornitore da indicare");
   }
+  if (reg.soloCE) return [...new Set(e)];
   if (!quadra(reg)) { const t = totali(reg); e.push(`Dare ${num(t.d)} e avere ${num(t.a)} non coincidono`); }
   return [...new Set(e)];
 }
@@ -1960,6 +1961,7 @@ async function registraProposta(p) {
   await ricordaConto(reg);
 }
 async function salvaReg(reg) {
+  if (SEMPL && !reg.soloCE && reg.causale !== "AP") { const ok = await soloCostiRicavi(reg); if (!ok) return; }
   reg.aziendaId = S.aziendaId; reg.anno = Number(reg.dataReg.slice(0, 4)); reg.trim = trimDi(reg.dataReg); reg.mese = Number(reg.dataReg.slice(5, 7));
   reg.chiave = reg.chiave || chiaveDi(reg); reg.creato = reg.creato || new Date().toISOString();
   delete reg.contoDa;
@@ -2447,7 +2449,7 @@ function renderPN() {
     tb.innerHTML = list.map(r => {
       const t = totali(r); D += t.d; A += t.a;
       return `<tr data-id="${esc(r.id)}"${S.editId === r.id ? ' class="sel"' : ""}><td><input type="checkbox" data-selpn${S.selPN.has(r.id) ? " checked" : ""} aria-label="Seleziona la registrazione"></td><td>${itDate(r.dataReg)}</td><td><span class="pill src">${esc(r.causale)}</span></td><td class="mono">${esc(r.numDoc || "")}</td>
-        <td>${esc(r.descr || "")}${r.righe.map(x => `<div class="sub"><span class="mono">${esc(x.conto)}</span> ${esc(descConto(x.conto).slice(0, 40))}${x.anagId ? " · " + esc(S.anag.find(a => a.id === x.anagId)?.denominazione || "") : ""} <span class="mono">${x.dare ? "D " + num(x.dare) : "A " + num(x.avere)}</span></div>`).join("")}</td>
+        <td>${esc(r.descr || "")}${r.righe.map(x => `<div class="sub"><span class="mono">${esc(x.conto)}</span> ${esc(descConto(x.conto).slice(0, 40))}${x.anagId ? " · " + esc(S.anag.find(a => a.id === x.anagId)?.denominazione || "") : ""} <span class="mono">${x.dare ? "D " + num(x.dare) : "A " + num(x.avere)}</span></div>`).join("")}${r.partita && r.soloCE ? `<div class="sub">${(r.incassi || []).length ? (r.incassi || []).map(i => `${r.partita.tipo === "C" ? "Incassata" : "Pagata"} il ${itDate(i.data)} <span class="mono">${num(i.importo)}</span>${i.rit ? ` (ritenuta ${num(i.rit)})` : ""}`).join(" · ") : `<span class="pill media">da ${r.partita.tipo === "C" ? "incassare" : "pagare"} ${num(r.partita.totale)}</span>`}</div>` : ""}</td>
         <td class="num">${num(t.d)}</td><td class="num">${num(t.a)}</td><td><span class="pill src">${esc(FONTI[r.fonte] || r.fonte || "")}</span></td>
         <td><div class="row" style="flex-wrap:nowrap"><button class="btn small" data-act="mod">Modifica</button><button class="btn small danger" data-act="del">Elimina</button></div></td></tr>`;
     }).join("");
@@ -4804,6 +4806,12 @@ function componentiS() {
     for (const e of righeEco(r)) out.push({ data: r.dataReg, mov: r, doc: r.partita ? r : null, ...e, quota: 1 });
   }
   if (met !== "registrazione") {
+    // documenti con soli costi e ricavi: incassi e pagamenti annotati sul documento stesso
+    for (const d of tutteRegs()) for (const i of d.incassi || []) {
+      if (String(i.data).slice(0, 4) !== Y || !d.partita?.totale) continue;
+      const q = i.importo / d.partita.totale, mov = { causale: d.partita.tipo === "C" ? "INC" : "PAG", dataReg: i.data, descr: i.descr || "", anagNome: d.anagNome };
+      for (const e of righeEco(d)) { if (COMPETENZA.test(descConto(e.conto))) continue; out.push({ data: i.data, mov, doc: d, conto: e.conto, tipo: e.tipo, imp: r2(e.imp * q), quota: q }); }
+    }
     for (const p of tutteRegs()) {
       if (String(p.dataReg).slice(0, 4) !== Y || !(p.abbinamenti || []).length) continue;
       for (const a of p.abbinamenti) {
@@ -6213,6 +6221,7 @@ function analisiRE() {
   // ritenute d'acconto subite sui compensi incassati nell'esercizio
   let rit = 0; const Y = String(S.anno);
   for (const r of S.regs) if (String(r.dataReg).slice(0, 4) === Y) for (const x of r.righe || []) if (x.conto === K.ritSubite || /^35\.05\.(05|51)$/.test(x.conto)) rit = r2(rit + (x.dare || 0) - (x.avere || 0));
+  for (const d of tutteRegs()) if (d.partita?.tipo === "C") for (const i of d.incassi || []) if (String(i.data).slice(0, 4) === Y && i.rit) rit = r2(rit + i.rit);
   const reddito = r2(c6 - spese);
   const rg = collettore();
   const at = soloCifre(az?.ateco || "").slice(0, 6); if (at) rg.set("RE", "RE001001", "Codice attività", at);
@@ -6380,7 +6389,7 @@ function prfErrori(A) {
   }
   return e;
 }
-let prfInCorso = false;
+let prfInCorso = false, prfElimina = false;
 function renderPrf() {
   const box = $("#prf-card"); if (!box) return;
   const A = prfAnalizza(), err = prfErrori(A), righe = [];
@@ -6392,6 +6401,8 @@ function renderPrf() {
     righe.push(`<div><span>Clienti e fornitori · conti movimentati</span><span class="mono">${A.nAnag} · ${A.conti.size}</span></div>`);
     if (A.creabili.length) righe.push(`<div><span>Conti di Profis da aggiungere al piano dei conti dell'azienda</span><span class="mono">${A.creabili.map(c => `${esc(c.cod)} ${esc(c.d)}`).join(" · ")}</span></div>`);
   }
+  const imp = aziendaCorrente()?.importProfis;
+  if (imp && !A) righe.push(`<div><span>Ultima importazione: ${imp.n} registrazioni fino al ${itDate(imp.data)} (${esc(imp.file || "Profis")})</span><span><button class="btn small" id="prf-elimina" type="button">${prfElimina ? "Conferma: elimina le registrazioni importate" : "Elimina l'importazione"}</button></span></div>`);
   if (A || PRF.IVA) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">Pronto per l'importazione nell'esercizio ${S.anno}</span><span></span></div>`);
   $("#prf-riepilogo").innerHTML = righe.join("");
   $("#prf-importa").disabled = !!err.length || prfInCorso;
@@ -6446,11 +6457,14 @@ async function prfImporta() {
     for (const R of G) {
       const causale = prfCausale(R), rif = prfRif(R.ref), chiave = `PRF|${R.data}|${R.caus}|${R.num}|${R.ref}`;
       if (esistenti.has(chiave)) { gia.push(R); continue; }
-      const righe = R.righe.map(x => { const a = anDi(x); return riga(foglia(x.cod), x.dare, x.avere, a ? { anagId: a.id } : undefined); });
+      const tutteRighe = R.righe.map(x => { const a = anDi(x); return riga(foglia(x.cod), x.dare, x.avere, a ? { anagId: a.id } : undefined); });
+      // contabilità semplificata: si imputano solo costi e ricavi
+      const righe = SEMPL ? tutteRighe.filter(x => isEco(x.conto)) : tutteRighe;
       const ans = [...new Set(R.righe.map(anDi).filter(Boolean))], an = ans.length === 1 ? ans[0] : null;
       const descr = R.tdoc ? `${R.tdoc} ${R.ref ? R.ref.replace(/^\S+\s*/, "") : ""}`.trim() : (R.righe.find(x => x.an)?.desc || R.righe[0]?.desc || "Prima nota");
       const reg = nuovaReg({ id: uid(), causale, dataReg: R.data, dataDoc: rif.data || R.data, numDoc: rif.num || "", descr: `${descr}${an ? ` · ${an.denominazione}` : ""}`, righe, chiave, numProfis: R.num, causaleProfis: R.caus });
       if (an) { reg.anagId = an.id; reg.anagNome = an.denominazione; }
+      if (SEMPL) reg.soloCE = true;
       // documento: partita aperta per il criterio di cassa
       if (an && ["FE", "FR", "NE", "NR"].includes(causale)) {
         const t = an.tipo, tot = r2(R.righe.filter(x => anDi(x) === an).reduce((s, x) => s + (t === "C" ? x.dare - x.avere : x.avere - x.dare), 0));
@@ -6477,7 +6491,7 @@ async function prfImporta() {
     const perAn = new Map(); for (const d of docs) { const k = d.an.id; if (!perAn.has(k)) perAn.set(k, []); perAn.get(k).push(d); }
     // anche i documenti già in contabilità (per esempio fatture importate dagli XML)
     for (const r of S.regs) if (r.partita && r.anagId) { const res = r2(r.partita.totale - abbinatoA(r.id)); if (Math.abs(res) >= 0.01) { if (!perAn.has(r.anagId)) perAn.set(r.anagId, []); perAn.get(r.anagId).push({ reg: r, an: S.anag.find(a => a.id === r.anagId), ref: "", residuo: res }); } }
-    const liberi = { C: 0, F: 0 }; let nAbb = 0, perImporto = 0;
+    const liberi = { C: 0, F: 0 }, modificati = new Set(); let nAbb = 0, perImporto = 0;
     for (let i = 0; i < regs.length; i++) {
       const reg = regs[i], R = reg._R; if (reg.partita || !R) continue;
       for (const x of R.righe) {
@@ -6488,11 +6502,27 @@ async function prfImporta() {
         let d = ref && cand.find(d => d.ref === ref && d.residuo + 0.004 >= imp);
         if (!d) { d = cand.find(d => Math.abs(d.residuo - imp) < 0.005) || cand.find(d => d.residuo + 0.004 >= imp); if (d) perImporto++; }
         if (!d) { liberi[a.tipo] = r2(liberi[a.tipo] + imp); reg._libero = (reg._libero || []).concat([{ tipo: a.tipo, imp }]); continue; }
-        reg.abbinamenti.push({ regId: d.reg.id, importo: r2(imp) }); d.residuo = r2(d.residuo - imp); nAbb++;
+        if (SEMPL) {
+          // incasso o pagamento annotato sul documento (data, importo lordo, ritenuta subita)
+          const rit = a.tipo === "C" ? r2(R.righe.filter(y => /^35\.05\./.test(y.cod)).reduce((s, y) => s + y.dare - y.avere, 0)) : 0;
+          const tot = r2(R.righe.filter(y => anDi(y) && anDi(y).tipo === a.tipo).reduce((s, y) => s + Math.abs(y.dare - y.avere), 0));
+          d.reg.incassi = (d.reg.incassi || []).concat([{ data: reg.dataReg, importo: r2(imp), rit: rit && tot ? r2(rit * imp / tot) : 0, conto: foglia(R.righe.find(y => /^19\./.test(y.cod))?.cod || ""), descr: x.desc, chiave: `${reg.chiave}|${x.an}`, creato: adesso }]);
+          if (!regs.includes(d.reg)) modificati.add(d.reg);
+        } else reg.abbinamenti.push({ regId: d.reg.id, importo: r2(imp) });
+        d.residuo = r2(d.residuo - imp); nAbb++;
       }
     }
     /* 4. incassi e pagamenti di documenti di anni precedenti: partita generica al 1° gennaio */
     const regsApe = [];
+    if (SEMPL) {
+      // incassi e pagamenti di documenti non presenti (anni precedenti): componente lordo alla data dell'incasso, da verificare
+      for (const r of regs) for (const l of r._libero || []) {
+        const c = l.tipo === "C" ? foglia(az.contoRicavi || K.ricServizi) : foglia(az.contoCosti || K.costoGen);
+        regsApe.push(nuovaReg({ id: uid(), causale: "GEN", dataReg: r.dataReg, dataDoc: r.dataReg, numDoc: "", descr: `${l.tipo === "C" ? "Incasso" : "Pagamento"} di documento non presente nel giornale (anno precedente): importo lordo da verificare${r.anagNome ? ` · ${r.anagNome}` : ""}`,
+          righe: [riga(c, l.tipo === "C" ? 0 : l.imp, l.tipo === "C" ? l.imp : 0)], soloCE: true, lordo: true, chiave: `${r.chiave}|L${l.tipo}` }));
+      }
+      liberi.C = liberi.F = 0;
+    }
     for (const t of ["C", "F"]) {
       const tot = liberi[t]; if (tot < 0.01) continue;
       const nome = t === "C" ? "Clienti diversi (partite al 1° gennaio da Profis)" : "Fornitori diversi (partite al 1° gennaio da Profis)";
@@ -6506,7 +6536,9 @@ async function prfImporta() {
     }
     for (const r of regs) { delete r._libero; delete r._R; }
     /* 5. scrittura */
-    const tutte = regsApe.concat(regs);
+    // contabilità semplificata: incassi, pagamenti e giroconti senza costi né ricavi non si registrano
+    const scartate = SEMPL ? regs.filter(r => !r.righe.length) : [];
+    const tutte = regsApe.concat(regs.filter(r => !scartate.includes(r))).concat([...modificati]);
     for (const r of tutte) { const e = erroriReg(r); if (e.length) throw new Error(`${r.descr} del ${itDate(r.dataReg)}: ${e[0]}`); }
     for (const r of tutte) out.push(["registrazioni", r]);
     msg(`Salvataggio di ${out.length} documenti…`);
@@ -6518,7 +6550,7 @@ async function prfImporta() {
     await store.put("aziende", azN);
     log("Importazione Profis", `${regs.length} registrazioni, ${anag.size} clienti e fornitori, ${nAbb} abbinamenti`, "ok");
     PRF = { G: null, IVA: null, file: {} }; renderPrf(); msg("");
-    prfMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(A.ultima)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${perImporto ? ` (${perImporto} per importo, perché il riferimento nella descrizione non corrispondeva)` : ""}${liberi.C + liberi.F ? `; ${num(liberi.C)} € di incassi e ${num(liberi.F)} € di pagamenti di documenti di anni precedenti su partite generiche al 1° gennaio` : ""}${nIva ? `; ${nIva} documenti nei registri IVA` : ""}${senzaIva ? `, ${senzaIva} senza righe IVA` : ""}${gia.length ? `; ${gia.length} registrazioni erano già state importate` : ""}${avvisi.length ? `. Da controllare: ${avvisi.slice(0, 3).join("; ")}` : ""}.`, "ok");
+    prfMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(A.ultima)}${SEMPL ? ` con i soli costi e ricavi (${scartate.length} incassi, pagamenti e giroconti annotati sui documenti o senza costi e ricavi)` : ""}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti ${SEMPL ? "annotati sulle" : "abbinati alle"} fatture${perImporto ? ` (${perImporto} per importo, perché il riferimento nella descrizione non corrispondeva)` : ""}${liberi.C + liberi.F ? `; ${num(liberi.C)} € di incassi e ${num(liberi.F)} € di pagamenti di documenti di anni precedenti su partite generiche al 1° gennaio` : ""}${nIva ? `; ${nIva} documenti nei registri IVA` : ""}${senzaIva ? `, ${senzaIva} senza righe IVA` : ""}${gia.length ? `; ${gia.length} registrazioni erano già state importate` : ""}${avvisi.length ? `. Da controllare: ${avvisi.slice(0, 3).join("; ")}` : ""}.`, "ok");
   } catch (e) {
     msg(""); prfMsg(`Importazione non riuscita: ${e.message || e}`, "err");
   } finally { prfInCorso = false; renderPrf(); }
@@ -6533,8 +6565,47 @@ async function prfImporta() {
   inp.addEventListener("change", () => { const f = [...inp.files]; inp.value = ""; if (f.length) prfCarica(f); });
   $("#prf-svuota").addEventListener("click", () => { PRF = { G: null, IVA: null, file: {} }; renderPrf(); prfMsg(""); });
   $("#prf-importa").addEventListener("click", prfImporta);
+  $("#prf-riepilogo").addEventListener("click", async e => {
+    if (!e.target.closest("#prf-elimina")) return;
+    if (!prfElimina) { prfElimina = true; renderPrf(); return; }
+    const az = aziendaCorrente(), id = az?.importProfis?.id; prfElimina = false; if (!id) return;
+    const ids = new Set(tutteRegs().filter(r => r.ripresaId === id).map(r => r.id));
+    prfMsg(`Eliminazione di ${ids.size} registrazioni…`, "work");
+    try { await bluElimina(ids); const n = { ...aziendaCorrente() }; delete n.importProfis; await store.put("aziende", n); prfMsg(`Importazione eliminata: ${ids.size} registrazioni. Puoi importare di nuovo i file di Profis.`, "ok"); }
+    catch (er) { prfMsg(`Eliminazione non riuscita: ${er.message || er}`, "err"); }
+    renderPrf();
+  });
   renderPrf();
 })();
+
+/* ======================= CONTABILITÀ SEMPLIFICATA: SOLO COSTI E RICAVI =======================
+   Nella contabilità semplificata si imputano solo i costi e i ricavi. Ogni documento conserva le righe di costo o di ricavo,
+   le righe IVA dei registri e il totale da incassare o pagare; gli incassi e i pagamenti si annotano sul documento
+   (data, importo, ritenuta) e servono al criterio di cassa. Banca, cassa, clienti, fornitori ed erario non si registrano. */
+const isEco = c => conto(c)?.t === "E";
+async function soloCostiRicavi(reg) {
+  if ((reg.abbinamenti || []).length) {
+    const docs = reg.abbinamenti.map(a => [a, tutteRegs().find(r => r.id === a.regId)]).filter(([, d]) => d);
+    if (docs.length && !docs.every(([, d]) => d.soloCE)) return true;   // documenti registrati in partita doppia: si lascia com'è
+    if (docs.length) {
+      const rit = r2(reg.righe.filter(x => x.conto === K.ritSubite).reduce((s, x) => s + (x.dare || 0) - (x.avere || 0), 0));
+      const tot = r2(docs.reduce((s, [a]) => s + Math.abs(a.importo), 0)), banca = reg.righe.find(x => /^19\./.test(x.conto))?.conto || "";
+      for (const [a, d] of docs) {
+        const inc = { data: reg.dataReg, importo: r2(a.importo), rit: tot && rit ? r2(rit * Math.abs(a.importo) / tot) : 0, conto: banca, descr: reg.descr || "", chiave: reg.chiave || "", creato: new Date().toISOString() };
+        const nd = { ...d, incassi: (d.incassi || []).concat([inc]) };
+        await store.put("registrazioni", nd); Object.assign(d, nd);
+      }
+      reg.abbinamenti = [];
+      const eco = reg.righe.filter(x => isEco(x.conto));
+      if (!eco.length) return false;   // l'incasso o il pagamento è annotato sul documento
+      reg.righe = eco; reg.soloCE = true; delete reg.partita; return true;
+    }
+  }
+  const eco = reg.righe.filter(x => isEco(x.conto));
+  if (!eco.length) { log("Prima nota", `${reg.descr || CAUSALI[reg.causale] || "Registrazione"}: nessun costo o ricavo, non registrata (nella contabilità semplificata si imputano solo costi e ricavi)`, "work"); return false; }
+  reg.righe = eco; reg.soloCE = true;
+  return true;
+}
 
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
