@@ -5565,40 +5565,67 @@ function bluSottoinsieme(pool, val, obiettivo, conti, nRichiesti, max) {
 function bluRicostruisci() {
   const X = BLU.X, C = BLU.C; if (!X || !C) return null;
   const perData = new Map(); C.forEach((r, i) => { if (!perData.has(r.data)) perData.set(r.data, []); perData.get(r.data).push(i); });
-  const usate = new Set(), regs = [], nonRis = [], vuote = [];
-  for (const R of X) {
-    const blank = R.righe.filter(x => x.avere === null), acc = new Set(blank.map(x => bluNc(x.dconto)));
-    let righe;
-    if (acc.size <= 1) {
+  const usate = new Set(), regs = [], nonRis = [], vuote = [], dav = [];
+  // registrazioni con più conti in dare: il mastrino dà solo il totale, gli importi dei singoli conti si prendono dal libro giornale CSV.
+  // Prima si abbinano le righe con la stessa descrizione, poi le altre della stessa data; se non c'è una combinazione esatta
+  // la registrazione si importa comunque con gli importi più vicini e resta segnalata da verificare.
+  const info = X.map(R => { const blank = R.righe.filter(x => x.avere === null); return { blank, acc: new Set(blank.map(x => bluNc(x.dconto))), sol: null, k: bluNd(R.desc) }; });
+  const prova = (R, I, soloDesc, maxPool) => {
+    const cand = (perData.get(R.data) || []).filter(i => !usate.has(i) && C[i].dare !== 0 && I.acc.has(bluNc(C[i].dconto)));
+    const pool = soloDesc ? cand.filter(i => bluNd(C[i].desc) === I.k) : cand;
+    if (!pool.length) return null;
+    const copre = l => new Set(l.map(i => bluNc(C[i].dconto))).size === I.acc.size;
+    if (Math.abs(pool.reduce((s, i) => s + C[i].dare, 0) - R.tot) < 0.005 && copre(pool)) return pool;
+    // blocco di righe consecutive del libro giornale (le paghe hanno molti conti in dare: salari, contributi, TFR…)
+    for (let a = 0; a < pool.length; a++) {
+      let somma = 0;
+      for (let b = a; b < pool.length; b++) {
+        somma += C[pool[b]].dare;
+        if (Math.abs(somma - R.tot) < 0.005) { const w = pool.slice(a, b + 1); if (copre(w)) return w; }
+        if (b - a > 200) break;
+      }
+    }
+    return pool.length <= maxPool ? bluSottoinsieme(pool, i => C[i].dare, R.tot, i => bluNc(C[i].dconto), I.acc.size, Math.max(8, I.acc.size + 2)) : null;
+  };
+  for (const [soloDesc, maxPool] of [[true, 20], [false, 16]])
+    X.forEach((R, n) => { const I = info[n]; if (I.acc.size <= 1 || I.sol) return; const sol = prova(R, I, soloDesc, maxPool); if (sol) { I.sol = sol; sol.forEach(i => usate.add(i)); } });
+  X.forEach((R, n) => {
+    const I = info[n]; let righe, approx = false;
+    if (I.acc.size <= 1) {
       righe = []; let fatto = false;
       for (const x of R.righe) {
         if (x.avere === null) { if (!fatto) { righe.push({ cod: x.cod, dconto: x.dconto, dare: r2(R.tot), avere: 0 }); fatto = true; } }
         else righe.push({ cod: x.cod, dconto: x.dconto, dare: 0, avere: r2(x.avere) });
       }
     } else {
-      const k = bluNd(R.desc);
-      const cand = (perData.get(R.data) || []).filter(i => !usate.has(i) && C[i].dare !== 0 && acc.has(bluNc(C[i].dconto)));
-      const pref = cand.filter(i => bluNd(C[i].desc) === k);
-      let sol = null;
-      for (const pool of [pref, cand]) {
-        if (!pool.length) continue;
-        if (Math.abs(pool.reduce((s, i) => s + C[i].dare, 0) - R.tot) < 0.005) { sol = pool; break; }
-        if (pool.length <= 16) { sol = bluSottoinsieme(pool, i => C[i].dare, R.tot, i => bluNc(C[i].dconto), acc.size, 8); if (sol) break; }
+      const per = new Map();
+      if (I.sol) for (const i of I.sol) { const kk = bluNc(C[i].dconto); per.set(kk, r2((per.get(kk) || 0) + C[i].dare)); }
+      else {
+        // importi più vicini: per ogni conto le righe del CSV della stessa data (prima quelle con la stessa descrizione)
+        approx = true;
+        const cand = (perData.get(R.data) || []).filter(i => !usate.has(i) && C[i].dare !== 0 && I.acc.has(bluNc(C[i].dconto)));
+        for (const kk of I.acc) {
+          const del = cand.filter(i => bluNc(C[i].dconto) === kk), stessa = del.filter(i => bluNd(C[i].desc) === I.k), u = stessa.length ? stessa : del.slice(0, 1);
+          if (u.length) { u.forEach(i => usate.add(i)); per.set(kk, r2(u.reduce((s, i) => s + C[i].dare, 0))); }
+        }
+        const ks = [...I.acc], noti = r2(ks.reduce((s, kk) => s + (per.get(kk) || 0), 0)), senza = ks.filter(kk => !per.has(kk));
+        if (senza.length) { const q = r2((R.tot - noti) / senza.length); senza.forEach((kk, j) => per.set(kk, j === senza.length - 1 ? r2(R.tot - noti - q * (senza.length - 1)) : q)); }
+        else if (Math.abs(noti - R.tot) >= 0.005) { const ult = ks[ks.length - 1]; per.set(ult, r2(per.get(ult) + R.tot - noti)); }
       }
-      if (!sol) { nonRis.push(R); continue; }
-      sol.forEach(i => usate.add(i));
       righe = R.righe.filter(x => x.avere !== null).map(x => ({ cod: x.cod, dconto: x.dconto, dare: 0, avere: r2(x.avere) }));
-      const per = new Map(); for (const i of sol) { const kk = bluNc(C[i].dconto); per.set(kk, r2((per.get(kk) || 0) + C[i].dare)); }
-      for (const x of blank) { const kk = bluNc(x.dconto); if (per.has(kk)) { righe.push({ cod: x.cod, dconto: x.dconto, dare: per.get(kk), avere: 0 }); per.delete(kk); } }
+      for (const x of I.blank) { const kk = bluNc(x.dconto); if (per.has(kk)) { righe.push({ cod: x.cod, dconto: x.dconto, dare: per.get(kk), avere: 0 }); per.delete(kk); } }
     }
     // importi negativi: si spostano nella colonna opposta
     for (const x of righe) { if (x.dare < 0) { x.avere = r2(x.avere - x.dare); x.dare = 0; } if (x.avere < 0) { x.dare = r2(x.dare - x.avere); x.avere = 0; } }
     righe = righe.filter(x => x.dare || x.avere);
-    if (!righe.length) { vuote.push(R); continue; }   // registrazioni a importo zero: non si riportano
-    regs.push({ ...R, righe });
-  }
+    if (!righe.length) { vuote.push(R); return; }   // registrazioni a importo zero: non si riportano
+    const d = righe.reduce((s, x) => s + x.dare - x.avere, 0);
+    if (Math.abs(d) >= 0.005) { nonRis.push(R); return; }
+    regs.push({ ...R, righe, ...(approx ? { daVerificare: true } : {}) });
+    if (approx) dav.push(R);
+  });
   const ultima = X.reduce((m, R) => R.data > m ? R.data : m, "");
-  return { regs, nonRis, vuote, ultima, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
+  return { regs, nonRis, vuote, dav, ultima, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
 }
 /* tipo di cliente o fornitore dal CSV (tipo riga) e dai partitari */
 function bluCliTipo() {
@@ -5800,7 +5827,6 @@ function bluErrori() {
     const anni = new Set(BLU.ric.regs.map(R => Number(R.data.slice(0, 4))));
     if (anni.size > 1) e.push("Il giornale contiene registrazioni di più esercizi");
     else if (anni.size && !anni.has(S.anno)) e.push(`Le registrazioni sono del ${[...anni][0]}: seleziona quell'esercizio in alto`);
-    if (BLU.ric.nonRis.length) e.push(`${BLU.ric.nonRis.length} registrazioni non ricostruite`);
   }
   const da = BLU.conti.filter(x => !contoOk(BLU.mappa[x.cod])).length;
   if (da) e.push(`${da} ${da === 1 ? "conto da collegare" : "conti da collegare"} al piano S1`);
@@ -5830,6 +5856,9 @@ function renderBlu() {
   for (const r of R?.regs || []) for (const x of r.righe) { const t = tipi.get(x.cod); if (t === "C") nCli.add(x.cod); else if (t === "F") nFor.add(x.cod); }
   const righe = [];
   if (R) righe.push(`<div><span>Registrazioni dal ${itDate(R.primaData)} al ${itDate(R.ultima)}</span><span class="mono">${R.regs.length}${R.nonRis.length ? ` · <span class="err">${R.nonRis.length} non ricostruite</span>` : " · tutte in quadratura"}${R.vuote.length ? ` · ${R.vuote.length} a importo zero escluse` : ""}</span></div>`);
+  const elenco = l => l.slice(0, 12).map(x => `${itDate(x.data)} n. ${esc(x.n)} ${esc(x.desc)} (${num(x.tot)})`).join(" · ") + (l.length > 12 ? ` · e altre ${l.length - 12}` : "");
+  if (R?.dav?.length) righe.push(`<div><span><span class="pill media">da verificare</span> ${R.dav.length} ${R.dav.length === 1 ? "registrazione ha" : "registrazioni hanno"} più conti in dare e nel libro giornale CSV non c'è una combinazione esatta degli importi: si importano con gli importi più vicini, da controllare in prima nota (cerca «da verificare»): ${elenco(R.dav)}</span><span></span></div>`);
+  if (R?.nonRis?.length) righe.push(`<div><span><span class="pill bassa">non importate</span> ${R.nonRis.length} ${R.nonRis.length === 1 ? "registrazione non quadra" : "registrazioni non quadrano"} nemmeno con il libro giornale CSV e ${R.nonRis.length === 1 ? "va registrata" : "vanno registrate"} a mano dopo l'importazione: ${elenco(R.nonRis)}</span><span></span></div>`);
   if (R && (nCli.size || nFor.size)) righe.push(`<div><span>Clienti e fornitori movimentati</span><span class="mono">${nCli.size} clienti · ${nFor.size} fornitori</span></div>`);
   if (ce) righe.push(`<div><span>Controllo del conto economico con il bilancio di Blustring (${ce.n} conti)</span><span class="mono">${ce.diff.length ? `<span class="err">${ce.diff.length} differenze</span>` : `<span class="ok">identico</span>`} · risultato ${eur(ce.utile)}</span></div>`);
   if (ape) righe.push(`<div><span>Saldi patrimoniali al 1° gennaio ricavati dal bilancio al ${itDate(ape.al)}</span><span class="mono">${ape.saldi.length} conti · ${Math.abs(ape.diff) < 0.01 ? `<span class="ok">in quadratura</span>` : `<span class="err">differenza ${num(ape.diff)}</span>`}</span></div>`);
@@ -5950,7 +5979,7 @@ async function bluImporta() {
       const cli = R.righe.filter(x => tipi.has(x.cod)).map(x => ({ cod: x.cod, tipo: tipi.get(x.cod), dare: x.dare, avere: x.avere }));
       const causale = bluCausale(R, cli, R.desc), m = R.desc.match(/\bN\.?\s+(.+?)\s+DEL\s+(\d{2}\/\d{2}\/\d{4})/i);
       const codici = [...new Set(cli.map(x => x.cod))], an = codici.length === 1 ? anag.get(codici[0]) : null;
-      const reg = nuovaReg({ id: uid(), causale, dataReg: R.data, dataDoc: m ? bluSerial(m[2]) : R.data, numDoc: m ? m[1] : "", descr: R.desc, righe, chiave: `BLU|${rid}|${R.n}`, numBlustring: R.n });
+      const reg = nuovaReg({ id: uid(), causale, dataReg: R.data, dataDoc: m ? bluSerial(m[2]) : R.data, numDoc: m ? m[1] : "", descr: R.daVerificare ? `${R.desc} – da verificare: importi in dare ricostruiti` : R.desc, righe, chiave: `BLU|${rid}|${R.n}`, numBlustring: R.n, ...(R.daVerificare ? { daVerificare: true } : {}) });
       if (an) { reg.anagId = an.id; reg.anagNome = an.denominazione; }
       if (an && ["FE", "FR", "NE", "NR"].includes(causale)) {
         const t = tipi.get(codici[0]), tot = r2(cli.reduce((s, x) => s + (t === "C" ? x.dare - x.avere : x.avere - x.dare), 0));
@@ -6038,9 +6067,9 @@ async function bluImporta() {
     await store.put("aziende", azNuova);
     bluSalvaMappa();
     log("Importazione Blustring", `${regs.length} registrazioni, ${anag.size} clienti e fornitori, ${nAbb} abbinamenti${nCes ? `, ${nCes} cespiti` : ""}`, "ok");
-    const fine = BLU.ric.ultima; BLU = bluVuoto(); renderBlu();
+    const fine = BLU.ric.ultima, ricFatta = BLU.ric; BLU = bluVuoto(); renderBlu();
     msg("");
-    bluMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(fine)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${nonAbb.length ? ` (${nonAbb.length} del partitario da abbinare a mano)` : ""}${nCes ? `, ${nCes} cespiti nel registro` : ""}${datiAn ? `; anagrafiche: ${datiAn.agg} completate con codice fiscale, partita IVA e indirizzo, ${datiAn.nuove} nominativi aggiunti` : ""}. Le liquidazioni IVA fino al ${itDate(fine)} restano quelle di Blustring.`, "ok");
+    bluMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(fine)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${nonAbb.length ? ` (${nonAbb.length} del partitario da abbinare a mano)` : ""}${nCes ? `, ${nCes} cespiti nel registro` : ""}${datiAn ? `; anagrafiche: ${datiAn.agg} completate con codice fiscale, partita IVA e indirizzo, ${datiAn.nuove} nominativi aggiunti` : ""}. Le liquidazioni IVA fino al ${itDate(fine)} restano quelle di Blustring.${ricFatta.dav?.length ? ` ${ricFatta.dav.length} registrazioni sono da verificare in prima nota (cerca «da verificare»).` : ""}${ricFatta.nonRis?.length ? ` ${ricFatta.nonRis.length} registrazioni non quadrano e vanno inserite a mano: ${ricFatta.nonRis.slice(0, 5).map(R => `${itDate(R.data)} n. ${R.n} ${R.desc}`).join("; ")}.` : ""}`, ricFatta.nonRis?.length || ricFatta.dav?.length ? "work" : "ok");
   } catch (e) {
     msg(""); bluMsg(`Importazione non riuscita: ${e.message || e}`, "err");
   } finally { bluInCorso = false; renderBlu(); }
