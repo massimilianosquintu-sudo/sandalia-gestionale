@@ -875,16 +875,37 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
         <p class="note">Clienti e fornitori di Blustring diventano anagrafiche collegate ai conti 11.03.01 e 33.03.01. Le corrispondenze scelte restano memorizzate per l'azienda.</p>
       </details>
       <style>
-        #blu-card{min-width:0}
-        #blu-card .lm>div{flex-wrap:wrap;gap:2px 14px;min-width:0}
-        #blu-card .lm>div>span{min-width:0;overflow-wrap:anywhere}
-        #blu-card .lm .mono{text-align:right}
+        #blu-card,#bri-card{min-width:0}
+        #blu-card .lm>div,#bri-card .lm>div{flex-wrap:wrap;gap:2px 14px;min-width:0}
+        #blu-card .lm>div>span,#bri-card .lm>div>span{min-width:0;overflow-wrap:anywhere}
+        #blu-card .lm .mono,#bri-card .lm .mono{text-align:right}
         #blu-msg{overflow-wrap:anywhere}
         .blu-det{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:12px}
         .blu-det>summary{cursor:pointer;font-weight:600}
       </style>
       <div class="lm" id="blu-riepilogo" style="margin-top:10px"></div>
       <div class="row"><button class="btn pri" id="blu-importa" type="button" disabled>Importa nella contabilità</button><span class="hint" id="blu-imp-msg" role="status"></span></div>
+    </div>
+    <div class="card" id="bri-card">
+      <div class="row"><h2>Importa i registri IVA da Blustring</h2><span class="spacer"></span><button class="btn small" id="bri-svuota" type="button">Ricomincia</button></div>
+      <p class="note">Per le aziende di cui Blustring tiene solo i registri IVA: carica i registri IVA integrati (registriintegrati.xls) di acquisti, vendite e corrispettivi, anche in più file. Ogni documento entra con la data di registrazione, i codici IVA, la percentuale di detrazione e i conti di Blustring collegati al piano dei conti; fornitori e clienti diventano anagrafiche e le fatture partite aperte da chiudere con incassi e pagamenti. I documenti già in contabilità, per esempio importati dagli XML, non si ripetono.</p>
+      <div class="drop" id="drop-bri" tabindex="0" role="button" aria-label="Seleziona i registri IVA integrati di Blustring">
+        <strong>Trascina qui i registri IVA integrati di Blustring</strong>
+        <span class="hint">Acquisti, vendite e corrispettivi: puoi selezionarli insieme</span>
+        <div class="formats"><span>XLS</span><span>XLSX</span></div>
+      </div>
+      <input type="file" id="in-bri" hidden multiple accept=".xls,.xlsx">
+      <p class="hint" id="bri-msg" role="status"></p>
+      <div class="lm" id="bri-riepilogo" style="margin-top:10px"></div>
+      <details id="bri-conti-box" class="blu-det" hidden open>
+        <summary id="bri-conti-sum">Conti di costo e di ricavo</summary>
+        <p class="hint" style="margin-top:8px">Controlla il conto proposto per ogni conto di Blustring; puoi cambiarlo cercando per codice o descrizione. Le scelte restano memorizzate per l'azienda.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Conto Blustring</th><th>Conto del piano dei conti</th><th class="num">Importo dell'anno</th></tr></thead>
+          <tbody id="bri-conti-body"></tbody>
+        </table></div>
+      </details>
+      <div class="row"><button class="btn pri" id="bri-importa" type="button" disabled>Importa i registri</button><span class="hint" id="bri-imp-msg" role="status"></span></div>
     </div>
     <div class="card" id="prf-card">
       <div class="row"><h2>Importa la contabilità da Profis</h2><span class="spacer"></span><button class="btn small" id="prf-svuota" type="button">Ricomincia</button></div>
@@ -5746,6 +5767,7 @@ async function bluCarica(files) {
         BLU.C = c; BLU.file.csv = { nome: f.name, n: c.length }; letti.push(`${f.name}: libro giornale, ${c.length} righe`); continue;
       }
       const { nome, righe } = await bluFoglio(f), t = bluTipo(nome, righe);
+      if (!t && typeof briRiconosci === "function" && briRiconosci(righe)) { letti.push(`${f.name}: registri IVA integrati, caricati nel riquadro «Importa i registri IVA da Blustring» qui sotto`); briCarica([f]); continue; }
       if (t === "giornale") { BLU.X = bluLeggiGiornale(righe); BLU.file.giornale = { nome: f.name, n: BLU.X.length }; letti.push(`${f.name}: mastrino giornale, ${BLU.X.length} registrazioni`); }
       else if (t === "pdc") { BLU.pdc = bluLeggiPdc(righe); BLU.file.pdc = { nome: f.name, n: Object.keys(BLU.pdc).length }; letti.push(`${f.name}: piano dei conti, ${BLU.file.pdc.n} conti`); }
       else if (t === "bilancio") {
@@ -6873,6 +6895,261 @@ $("#regiva-body").addEventListener("change", async e => {
   try { await store.put("registrazioni", { ...r, prot }); r.prot = prot; } catch { $("#riv-msg").textContent = "Salvataggio non riuscito: riprova."; }
   renderRegIva();
 });
+/* ======================= IMPORTAZIONE DEI SOLI REGISTRI IVA DA BLUSTRING (registri integrati) =======================
+   File «registriintegrati.xls» esportato da Blustring: per ogni registro (1 acquisti, 2 vendite, 3 corrispettivi) una riga
+   di testata per documento (controparte con partita IVA o codice fiscale; «fattura N del gg/mm/aaaa, registrata il gg/mm/aaaa»)
+   seguita dalle righe IVA («IVA 22%; IMP: 208,00; IVA: 45,76; Det. 100%», oppure «1.500,00€ Non soggette IVA … (N2)») e dalle
+   righe dei conti di costo o di ricavo; per i corrispettivi una riga «Incasso corrispettivi» con il totale incassato.
+   Le righe hanno già dare e avere: diventano la registrazione, con il conto del piano dei conti che corrisponde alla
+   descrizione del conto di Blustring (proposto e modificabile). Fatture e note di credito diventano partite aperte. */
+let BRI = { docs: [], file: [], mappa: {}, fonte: {} };
+const briMsg = (t, cls) => { const el = $("#bri-msg"); if (el) { el.textContent = t; el.className = "hint " + (cls || ""); } };
+const briMapKey = () => `sandalia-bri-mappa-${S.aziendaId || "x"}`;
+const briNorm = s => String(s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const briData = s => { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(s || "")); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
+function briRiconosci(righe) {
+  for (let i = 0; i < Math.min(righe.length, 5); i++) {
+    const h = (righe[i] || []).map(x => String(x ?? "").trim().toLowerCase());
+    if (h.includes("idregistro") && h.includes("deskrigo") && h.includes("importoavere")) {
+      const c = k => h.indexOf(k);
+      return { riga: i, desc: c("deskrigo"), dare: c("importodare"), avere: c("importoavere"), info: c("altreinfo"), dataReg: c("dataregistrazione"), id: c("idregistro") };
+    }
+  }
+  return null;
+}
+/* riga IVA: aliquota o natura, imponibile, imposta, percentuale di detrazione */
+function briIva(info, desc) {
+  const t = String(info || ""), num = s => bluNum(String(s || "").replace(/€/g, "").trim());
+  const al = /\biva\s+(\d+(?:[.,]\d+)?)\s*%/i.exec(t), imp = /IMP:\s*(-?[\d.,]+)/i.exec(t), iva = /IVA:\s*(-?[\d.,]+)/i.exec(t), det = /Det\.?\s*(\d+(?:[.,]\d+)?)\s*%/i.exec(t);
+  const lead = /^\s*(-?[\d.]+,\d{2})\s*€/.exec(t);
+  const o = { imp: r2(imp ? num(imp[1]) : lead ? num(lead[1]) : 0), iva: r2(iva ? num(iva[1]) : 0), det: det ? bluNum(det[1]) : 100, vendite: /vendit/i.test(desc), corr: /corrispett/i.test(desc) };
+  const nat = [...t.matchAll(/\((N\d(?:\.\d+)?)\)/g)].map(m => m[1]).pop() || "";
+  if (al && Number(al[1].replace(",", ".")) > 0) o.cod = String(Number(al[1].replace(",", ".")));
+  else if (/invers|reverse|art\.?\s*17/i.test(t)) { o.cod = "N6.9"; o.rc = true; }
+  else if (/esent/i.test(t)) o.cod = "N4";
+  else if (/esclus|art\.?\s*15/i.test(t)) o.cod = "N1";
+  else if (/non imponib/i.test(t)) o.cod = "N3.6";
+  else if (/margine/i.test(t)) o.cod = "N5";
+  else if (/non sogg/i.test(t) || nat === "N2") o.cod = /7.?(ter|quater|quinquies|sexies|septies)/i.test(t) ? "N2.1" : "N2.2";
+  else o.cod = /^N\d\.\d$/.test(nat) ? nat : nat === "N3" ? "N3.6" : nat === "N6" ? "N6.9" : nat || "N2.2";
+  return o;
+}
+function briLeggi(righe, col, nomeFile) {
+  const docs = []; let sez = 0, cur = null, periodo = "";
+  for (let i = col.riga + 1; i < righe.length; i++) {
+    const r = righe[i] || [], desc = String(r[col.desc] ?? "").trim(), info = String(r[col.info] ?? "").trim();
+    const dare = r2(bluNum(r[col.dare])), avere = r2(bluNum(r[col.avere]));
+    if (typeof r[col.id] === "number" && !desc) { sez = r[col.id]; cur = null; continue; }
+    const pl = r.find(x => /PERIODO DI LIQUIDAZIONE/i.test(String(x || ""))); if (pl) { periodo = String(pl).replace(/.*:\s*/, ""); continue; }
+    if (!desc) continue;
+    const testata = /^(.*?)\s+(\S.*?)\s+del\s+(\d{1,2}\/\d{1,2}\/\d{4}),\s*registrata il\s+(\d{1,2}\/\d{1,2}\/\d{4})/i.exec(info);
+    if (testata) {
+      const id = /(?:P\.\s*IVA|C\.\s*F\.)\s*:?\s*([A-Z0-9]+)/i.exec(desc);
+      cur = { tipo: "doc", sez, file: nomeFile, tipoDoc: testata[1].trim().toLowerCase(), numero: testata[2].trim(), data: briData(testata[3]), reg: briData(testata[4]),
+        cp: desc.replace(/\s+-\s+(P\.\s*IVA|C\.\s*F\.).*$/i, "").trim(), id: id ? id[1].toUpperCase() : "", tDare: dare, tAvere: avere, iva: [], conti: [] };
+      docs.push(cur); continue;
+    }
+    if (/^incasso corrispettivi/i.test(desc)) {
+      cur = { tipo: "corr", sez, file: nomeFile, data: bluSerial(col.dataReg >= 0 ? r[col.dataReg] : null) || briData(info), tDare: dare, tAvere: avere, iva: [], conti: [] };
+      cur.reg = cur.data; docs.push(cur); continue;
+    }
+    if (!cur) continue;
+    if (/^iva\b/i.test(desc)) { const v = briIva(info, desc); v.dare = dare; v.avere = avere; if (v.imp || v.iva || dare || avere) cur.iva.push(v); continue; }
+    if (dare || avere) cur.conti.push({ desc, dare, avere });
+  }
+  for (const d of docs) {
+    // registro di appartenenza: dal numero del registro di Blustring o, se manca, dal segno della testata
+    if (d.tipo === "corr") { d.causale = "CO"; continue; }
+    const venIva = d.iva.some(v => v.vendite) && !d.iva.some(v => !v.vendite);
+    const vend = d.sez === 2 || (d.sez !== 1 && (venIva || d.tDare > d.tAvere));
+    const nc = /nota|credito/.test(d.tipoDoc) || (vend ? d.tAvere > d.tDare : d.tDare > d.tAvere);
+    d.causale = vend ? (nc ? "NE" : "FE") : (nc ? "NR" : "FR");
+  }
+  return { docs, periodo };
+}
+/* conto del piano dei conti dalla descrizione del conto di Blustring */
+const BRI_CONTI = [
+  [/^merci|acquist[oi] merci|merci c\/?acquist/i, "55.01.07"], [/materie prime/i, "55.01.01"], [/beni per la produzione di servizi/i, "55.03.01"],
+  [/material[ei] (vario )?di consumo|acquisto material/i, "55.01.05"], [/piccola attrezzatura|attrezzatura minuta/i, "55.07.03"], [/cancelleria|stampati/i, "55.07.17"],
+  [/trasporti su acquist|spese di trasporto/i, "57.05.01"], [/trasporti su vendit/i, "57.03.01"], [/servizi telematic/i, "57.09.07"],
+  [/consulenze fiscali|tenuta della contabilit|consulenze amministrativ/i, "61.01.01"], [/consulenze tecnic/i, "61.01.03"], [/consulenze legal/i, "61.01.05"],
+  [/notai|notaril/i, "61.01.07"], [/prestazioni professionali|consulenz/i, "61.01.11"], [/servizi amministrativ|spese amministrativ/i, "63.05.11"],
+  [/manutenzion.*beni di terzi/i, "57.11.17"], [/oneri diversi/i, "71.03.51"], [/mobili|arredi/i, "05.07.01"], [/corrispettiv/i, "@corrisp"],
+  [/vendit.*merci|merci.*vendit|vendite/i, "@ricMerci"], [/prestazion.*serviz|ricavi.*serviz|compens/i, "@ricServizi"]
+];
+function briProponi(desc, ricavo) {
+  const az = aziendaCorrente(), n = briNorm(desc);
+  const tutti = [...PDC.values()].filter(x => x.leaf && !x.eliminato && (ricavo ? /^(47|53|73)\./.test(x.c) : x.t === "E" || /^0[35]\./.test(x.c)));
+  const ug = tutti.find(x => briNorm(x.d) === n); if (ug) return { c: ug.c, f: "stessa descrizione" };
+  for (const [re, c0] of BRI_CONTI) if (re.test(desc)) { const c = c0[0] === "@" ? K[c0.slice(1)] : c0, f = foglia(c); if (contoOk(f) && (ricavo ? /^(47|53|73)\./.test(f) : !/^(47|53|73)\./.test(f))) return { c: f, f: "proposto" }; }
+  if (!ricavo) { const s = suggerisciCosto(desc); if (s) return { c: s, f: "proposto" }; }
+  return { c: foglia(ricavo ? (az?.contoRicavi || K.ricServizi) : (az?.contoCosti || K.costoGen)), f: "abituale" };
+}
+function briConti() {
+  const m = new Map();
+  for (const d of BRI.docs) for (const x of d.conti) {
+    const ric = ["FE", "NE", "CO"].includes(d.causale), k = `${ric ? "R" : "C"}|${x.desc}`;
+    const o = m.get(k) || { k, desc: x.desc, ric, n: 0, tot: 0 }; o.n++; o.tot = r2(o.tot + (ric ? x.avere - x.dare : x.dare - x.avere)); m.set(k, o);
+  }
+  for (const o of m.values()) if (!contoOk(BRI.mappa[o.k])) { const p = briProponi(o.desc, o.ric); BRI.mappa[o.k] = p.c; BRI.fonte[o.k] = p.f; }
+  return [...m.values()].sort((a, b) => Number(a.ric) - Number(b.ric) || b.tot - a.tot);
+}
+function briAnno(d) { return String(d.reg || d.data || "").slice(0, 4) === String(S.anno); }
+function briErrori(conti) {
+  const e = [];
+  if (!aziendaCorrente()) e.push("Seleziona l'azienda");
+  if (!BRI.docs.length) return e;
+  if (!BRI.docs.some(briAnno)) e.push(`I registri non contengono documenti registrati nell'esercizio ${S.anno}: scegli l'anno giusto in alto`);
+  const da = conti.filter(o => !contoOk(BRI.mappa[o.k])).length;
+  if (da) e.push(`${da} ${da === 1 ? "conto da collegare" : "conti da collegare"} al piano dei conti`);
+  return e;
+}
+let briInCorso = false, briElimina = false;
+function renderBri() {
+  const box = $("#bri-card"); if (!box) return;
+  const conti = briConti(), err = briErrori(conti), righe = [], D = BRI.docs, az = aziendaCorrente();
+  const conta = c => D.filter(d => d.causale === c && briAnno(d));
+  const tot = (l, f) => r2(l.reduce((s, d) => s + f(d), 0));
+  if (BRI.file.length) righe.push(`<div><span>File caricati</span><span class="mono">${BRI.file.map(f => `${esc(f.nome)}${f.periodo ? ` (${esc(f.periodo)})` : ""}`).join(" · ")}</span></div>`);
+  const fr = conta("FR"), nr = conta("NR"), fe = conta("FE"), ne = conta("NE"), co = conta("CO");
+  if (fr.length || nr.length) righe.push(`<div><span>Fatture ricevute${nr.length ? " e note di credito" : ""}</span><span class="mono">${fr.length}${nr.length ? ` + ${nr.length} NC` : ""} · ${num(tot(fr, d => d.tAvere - d.tDare) - tot(nr, d => d.tDare - d.tAvere))} €</span></div>`);
+  if (fe.length || ne.length) righe.push(`<div><span>Fatture emesse${ne.length ? " e note di credito" : ""}</span><span class="mono">${fe.length}${ne.length ? ` + ${ne.length} NC` : ""} · ${num(tot(fe, d => d.tDare - d.tAvere) - tot(ne, d => d.tAvere - d.tDare))} €</span></div>`);
+  if (co.length) righe.push(`<div><span>Corrispettivi giornalieri (IVA inclusa)</span><span class="mono">${co.length} · ${num(tot(co, d => d.tDare - d.tAvere))} €</span></div>`);
+  const altri = D.filter(d => !briAnno(d)).length;
+  if (altri) righe.push(`<div><span>Documenti registrati in altri esercizi, esclusi</span><span class="mono">${altri}</span></div>`);
+  if (D.length && SEMPL) {
+    const met = metodoS(az);
+    righe.push(`<div><span>Contabilità semplificata: si registrano i soli costi e ricavi. ${met === "registrazione" ? "Con l'opzione di registrazione le fatture valgono alla data di registrazione." : "Le fatture valgono quando sono incassate o pagate: annota incassi e pagamenti dagli estratti conto (oppure, se il cliente ha l'opzione di registrazione, impostala nella scheda Azienda)."}</span><span></span></div>`);
+  }
+  const imp = az?.importRegBlu || [];
+  if (imp.length && !D.length) righe.push(`<div><span>Registri già importati: ${imp.map(x => `${esc(x.file)} (${x.n})`).join(" · ")}</span><span><button class="btn small" id="bri-elimina" type="button">${briElimina ? "Conferma: elimina le registrazioni importate dai registri" : "Elimina le importazioni"}</button></span></div>`);
+  if (D.length) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">Pronto per l'importazione nell'esercizio ${S.anno}</span><span></span></div>`);
+  $("#bri-riepilogo").innerHTML = righe.join("");
+  const det = $("#bri-conti-box"); det.hidden = !conti.length;
+  if (conti.length) {
+    const nDa = conti.filter(o => !contoOk(BRI.mappa[o.k])).length;
+    $("#bri-conti-sum").textContent = `Conti di costo e di ricavo · ${conti.length} conti di Blustring${nDa ? ` · ${nDa} da collegare` : " · tutti collegati, da verificare"}`;
+    $("#bri-conti-body").innerHTML = conti.map(o => {
+      const c = BRI.mappa[o.k] || "", ok = contoOk(c), f = BRI.fonte[o.k];
+      return `<tr data-bri="${esc(o.k)}"><td>${esc(o.desc)}<div class="sub">${o.ric ? "ricavo" : "costo"} · ${o.n} ${o.n === 1 ? "riga" : "righe"}</div></td>
+        <td><input class="cf mono" data-conto data-bri-conto value="${esc(c)}" placeholder="Cerca conto" aria-label="Conto del piano per ${esc(o.desc)}" style="width:130px"><div class="sub">${ok ? esc(descConto(c)) + (f && f !== "manuale" ? ` <span class="pill src">${esc(f)}</span>` : "") : c ? `<span class="pill bassa">conto non valido</span>` : `<span class="pill media">da collegare</span>`}</div></td>
+        <td class="num">${num(o.tot)}</td></tr>`;
+    }).join("");
+  }
+  $("#bri-importa").disabled = !D.length || !!err.length || briInCorso;
+}
+async function briCarica(files) {
+  if (!aziendaCorrente()) return briMsg("Crea o seleziona prima l'azienda", "err");
+  try { BRI.mappa = { ...JSON.parse(localStorage.getItem(briMapKey()) || "{}"), ...BRI.mappa }; } catch {}
+  const letti = [];
+  for (const f of files) {
+    briMsg(`Lettura di ${f.name}…`, "work");
+    try {
+      const { righe } = await bluFoglio(f), col = briRiconosci(righe);
+      if (!col) { letti.push(`${f.name}: non sono i registri IVA integrati di Blustring`); continue; }
+      const { docs, periodo } = briLeggi(righe, col, f.name);
+      BRI.docs = BRI.docs.filter(d => d.file !== f.name).concat(docs);
+      BRI.file = BRI.file.filter(x => x.nome !== f.name).concat([{ nome: f.name, n: docs.length, periodo }]);
+      letti.push(`${f.name}: registri IVA integrati, ${docs.length} documenti${periodo ? ` (${periodo})` : ""}`);
+    } catch (e) { letti.push(`${f.name}: ${e.message || "file non leggibile"}`); }
+  }
+  renderBri();
+  briMsg(letti.join(" · "), letti.some(x => /non |leggibile/.test(x)) ? "work" : "ok");
+}
+async function briImporta() {
+  const conti = briConti(), err = briErrori(conti); if (err.length) return briMsg(err[0], "err");
+  briInCorso = true; renderBri();
+  const msg = t => { const el = $("#bri-imp-msg"); if (el) el.textContent = t; };
+  const az = aziendaCorrente(), rid = uid(), adesso = new Date().toISOString(), anno = S.anno, out = [], avvisi = [];
+  try { localStorage.setItem(briMapKey(), JSON.stringify(BRI.mappa)); } catch {}
+  try {
+    const esistenti = new Set(tutteRegs().map(r => r.chiave || chiaveDi(r)).filter(Boolean));
+    const anagNuove = new Map(), regs = []; let gia = 0, sbil = 0;
+    const anagDi = d => {
+      const tipo = ["FE", "NE"].includes(d.causale) ? "C" : "F", piva = /^\d{11}$/.test(d.id) ? d.id : "", cf = piva ? "" : d.id;
+      const k = `${tipo}|${d.id || briNorm(d.cp)}`; if (anagNuove.has(k)) return anagNuove.get(k);
+      let a = trovaAnag(tipo, { piva, cf, nome: d.cp });
+      if (!a) { a = { id: uid(), aziendaId: S.aziendaId, tipo, denominazione: d.cp, piva, cf, conto: "", creato: adesso, fonte: "blustring" }; out.push(["anagrafiche", a]); }
+      anagNuove.set(k, a); return a;
+    };
+    for (const d of BRI.docs) {
+      if (!briAnno(d)) continue;
+      const C = d.causale, ven = ["FE", "NE"].includes(C), nc = ["NE", "NR"].includes(C), sg = nc ? -1 : 1;
+      const reg = { id: uid(), causale: C, dataReg: d.reg, dataDoc: d.data || d.reg, numDoc: d.numero || "", righe: [], iva: [], abbinamenti: [], fonte: "blustring", file: d.file, ripresaId: rid, aziendaId: S.aziendaId, anno, creato: adesso, trim: trimDi(d.reg), mese: Number(d.reg.slice(5, 7)) };
+      if (C === "CO") {
+        reg.descr = "Corrispettivi giornalieri (registri IVA di Blustring)";
+        aggiungiRiga(reg.righe, K.cassa, d.tDare, d.tAvere);
+      } else {
+        const a = anagDi(d);
+        Object.assign(reg, { anagId: a.id, anagNome: a.denominazione, anagPiva: a.piva || a.cf || d.id, descr: `${CAUSALI[C]} n. ${d.numero} · ${a.denominazione}` });
+        reg.righe.push(riga(ven ? K.clienti : K.fornitori, d.tDare, d.tAvere, { anagId: a.id }));
+        reg.partita = { tipo: ven ? "C" : "F", totale: r2(ven ? d.tDare - d.tAvere : d.tAvere - d.tDare), ritenuta: 0, scadenza: "" };
+      }
+      // righe IVA: conto dell'imposta e annotazione nei registri
+      const rcRid = d.iva.some(v => v.vendite) && d.iva.some(v => !v.vendite) && !ven ? uid() : null;
+      for (const v of d.iva) {
+        const regIva = C === "CO" ? "C" : ven ? "V" : v.vendite && rcRid ? "V" : "A";
+        if (regIva === "A") {
+          const detr = r2((v.dare - v.avere) * Math.min(100, Math.max(0, v.det)) / 100), ind = r2(v.dare - v.avere - detr);
+          aggiungiRiga(reg.righe, K.ivaAcq, Math.max(detr, 0), Math.max(-detr, 0)); aggiungiRiga(reg.righe, K.ivaIndet, Math.max(ind, 0), Math.max(-ind, 0));
+        } else aggiungiRiga(reg.righe, regIva === "C" ? K.ivaCorr : K.ivaVen, v.dare, v.avere);
+        if (!v.imp && !v.iva) continue;
+        const rc = !!rcRid || !!v.rc;
+        reg.iva.push({ reg: regIva, cod: v.cod, imp: r2(Math.abs(v.imp) * sg), iva: r2(Math.abs(v.iva) * sg), detr: regIva === "A" ? r2(Math.abs(v.iva) * v.det / 100 * sg) : 0, esig: "I", rc, nat: /^N/.test(v.cod) ? v.cod : "", ...(rcRid ? { rid: rcRid, td: "TD16" } : {}) });
+      }
+      for (const x of d.conti) {
+        const k = `${["FE", "NE", "CO"].includes(C) ? "R" : "C"}|${x.desc}`;
+        aggiungiRiga(reg.righe, BRI.mappa[k], x.dare, x.avere);
+      }
+      // contabilità semplificata: solo i conti di costo e di ricavo (e i beni strumentali, per il registro dei cespiti)
+      if (SEMPL) { const tieni = new Set(d.conti.map(x => BRI.mappa[`${["FE", "NE", "CO"].includes(C) ? "R" : "C"}|${x.desc}`])); reg.righe = reg.righe.filter(x => tieni.has(x.conto)); reg.soloCE = true; }
+      else if (!quadra(reg)) { sbil++; avvisi.push(`${reg.descr} del ${itDate(reg.dataReg)}: dare e avere non coincidono nel file`); continue; }
+      reg.chiave = C === "CO" ? `C|${reg.dataReg}|${r2(d.tDare - d.tAvere).toFixed(2)}` : chiaveDi(reg);
+      if (esistenti.has(reg.chiave)) { gia++; continue; }
+      const e = erroriReg(reg); if (e.length) throw new Error(`${reg.descr} del ${itDate(reg.dataReg)}: ${e[0]}`);
+      regs.push(reg);
+    }
+    if (!regs.length) throw new Error(gia ? `tutti i ${gia} documenti sono già in contabilità` : "nessun documento da importare");
+    for (const r of regs) out.push(["registrazioni", r]);
+    msg(`Salvataggio di ${out.length} documenti…`);
+    await bluScrivi(out, (i, n) => msg(`Salvataggio… ${i} di ${n}`));
+    if (!S.db && !lsLoad().registrazioni.some(r => r.id === regs[regs.length - 1].id)) throw new Error("lo spazio del browser non basta per salvare tutte le registrazioni: apri la contabilità dentro Claude o dal portale con l'archivio condiviso");
+    const fileN = BRI.file.map(f => f.nome).join(", ");
+    await store.put("aziende", { ...aziendaCorrente(), importRegBlu: (aziendaCorrente().importRegBlu || []).concat([{ id: rid, file: fileN, n: regs.length, anno, creato: adesso }]) });
+    const n = c => regs.filter(r => r.causale === c).length, nAn = out.filter(([c]) => c === "anagrafiche").length;
+    log("Registri IVA Blustring", `${regs.length} registrazioni`, "ok");
+    BRI = { docs: [], file: [], mappa: {}, fonte: {} }; msg("");
+    briMsg(`Importazione completata: ${[n("FR") ? `${n("FR")} fatture ricevute` : "", n("NR") ? `${n("NR")} note di credito ricevute` : "", n("FE") ? `${n("FE")} fatture emesse` : "", n("NE") ? `${n("NE")} note di credito emesse` : "", n("CO") ? `${n("CO")} corrispettivi giornalieri` : ""].filter(Boolean).join(", ")}${nAn ? `; ${nAn} nuovi clienti e fornitori` : ""}${gia ? `; ${gia} documenti erano già in contabilità e non sono stati ripetuti` : ""}${sbil ? `; ${sbil} non importati perché dare e avere non coincidono (${avvisi.slice(0, 2).join("; ")})` : ""}. Le fatture sono partite aperte: chiudile con gli incassi e i pagamenti degli estratti conto. Controlla i registri nella scheda Registri IVA.`, sbil ? "work" : "ok");
+  } catch (e) {
+    msg(""); briMsg(`Importazione non riuscita: ${e.message || e}`, "err");
+  } finally { briInCorso = false; renderBri(); }
+}
+(() => {
+  const d = $("#drop-bri"), inp = $("#in-bri"); if (!d) return;
+  d.addEventListener("click", () => inp.click());
+  d.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inp.click(); } });
+  ["dragenter", "dragover"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.remove("over"); }));
+  d.addEventListener("drop", e => { const f = [...(e.dataTransfer?.files || [])]; if (f.length) briCarica(f); });
+  inp.addEventListener("change", () => { const f = [...inp.files]; inp.value = ""; if (f.length) briCarica(f); });
+  $("#bri-svuota").addEventListener("click", () => { BRI = { docs: [], file: [], mappa: {}, fonte: {} }; renderBri(); briMsg(""); });
+  $("#bri-importa").addEventListener("click", briImporta);
+  const setConto = (tr, c) => { BRI.mappa[tr.dataset.bri] = c; BRI.fonte[tr.dataset.bri] = "manuale"; try { localStorage.setItem(briMapKey(), JSON.stringify(BRI.mappa)); } catch {} renderBri(); };
+  $("#bri-conti-body").addEventListener("conto", e => { const tr = e.target.closest("tr[data-bri]"); if (tr) setConto(tr, e.detail); });
+  $("#bri-conti-body").addEventListener("change", e => { const tr = e.target.closest("tr[data-bri]"); if (tr && e.target.matches("[data-bri-conto]")) setConto(tr, e.target.value.trim()); });
+  $("#bri-riepilogo").addEventListener("click", async e => {
+    if (!e.target.closest("#bri-elimina")) return;
+    if (!briElimina) { briElimina = true; renderBri(); return; }
+    briElimina = false;
+    const az = aziendaCorrente(), idsImp = new Set((az?.importRegBlu || []).map(x => x.id));
+    const ids = new Set(tutteRegs().filter(r => idsImp.has(r.ripresaId)).map(r => r.id));
+    briMsg(`Eliminazione di ${ids.size} registrazioni…`, "work");
+    try { await bluElimina(ids); const n = { ...aziendaCorrente() }; delete n.importRegBlu; await store.put("aziende", n); briMsg(`Importazioni eliminate: ${ids.size} registrazioni.`, "ok"); }
+    catch (er) { briMsg(`Eliminazione non riuscita: ${er.message || er}`, "err"); }
+    renderBri();
+  });
+  renderBri();
+})();
 
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
