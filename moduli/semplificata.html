@@ -873,6 +873,19 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
       <div class="lm" id="blu-riepilogo" style="margin-top:10px"></div>
       <div class="row"><button class="btn pri" id="blu-importa" type="button" disabled>Importa nella contabilità</button><span class="hint" id="blu-imp-msg" role="status"></span></div>
     </div>
+    <div class="card" id="prf-card">
+      <div class="row"><h2>Importa la contabilità da Profis</h2><span class="spacer"></span><button class="btn small" id="prf-svuota" type="button">Ricomincia</button></div>
+      <p class="note">Carica il libro giornale (prima nota) e i registri IVA esportati da Profis in Excel. Le registrazioni si riportano con gli stessi conti (piano S1 per le imprese, SP_SIS per i professionisti); fatture e note di credito diventano partite aperte e gli incassi e i pagamenti si collegano alle fatture dal riferimento nella descrizione o, se non corrisponde, dall'importo. Dai registri IVA si ricavano codici IVA, esenzioni e reverse charge per i registri e le liquidazioni.</p>
+      <div class="drop" id="drop-prf" tabindex="0" role="button" aria-label="Seleziona i file esportati da Profis">
+        <strong>Trascina qui il libro giornale e i registri IVA di Profis</strong>
+        <span class="hint">Puoi selezionarli insieme: ognuno viene riconosciuto dal contenuto</span>
+        <div class="formats"><span>XLSX</span><span>XLS</span></div>
+      </div>
+      <input type="file" id="in-prf" hidden multiple accept=".xls,.xlsx">
+      <p class="hint" id="prf-msg" role="status"></p>
+      <div class="lm" id="prf-riepilogo" style="margin-top:10px"></div>
+      <div class="row"><button class="btn pri" id="prf-importa" type="button" disabled>Importa nella contabilità</button><span class="hint" id="prf-imp-msg" role="status"></span></div>
+    </div>
     <div class="card">
       <h2>1 · Data e tipo di ripresa</h2>
       <div class="formgrid">
@@ -6151,7 +6164,7 @@ function rigoRE(e, x) {
     if (/leas|locaz\.?\s*finanz|locazione finanziaria/.test(d)) return { r: "RE008002" };
     return { r: "RE009001" };
   }
-  if (/^57\.13\./.test(c) || /fabbric|immob|locali/.test(d)) return { r: "RE010001" };
+  if (/^57\.13\./.test(c) || /fabbric|immob/.test(d) || (/locali/.test(d) && !/pulizia/.test(d))) return { r: "RE010001" };
   if (/^CE\.B\.9/.test(v) || /^67\./.test(c) || /^61\.03\.0[17]/.test(c) || /co\.co\.co|lavoro accessorio|inail lavoro/.test(d)) return { r: "RE011003" };
   if (/afferent/.test(d) && !/non affer/.test(d)) return { r: "RE012001" };
   if (/^CE\.C\.17/.test(v) && /interess|inter\./.test(d)) return { r: "RE013001" };
@@ -6160,7 +6173,7 @@ function rigoRE(e, x) {
   if (/master|corsi|formaz|aggiorn|convegn|congress/.test(d)) return { r: "RE017002" };
   if (/cert.*comp|orient/.test(d)) return { r: "RE017003" };
   if (/alberg|ristor|vitto|alloggi|somministr/.test(d)) return { r: "RE015001" };
-  if (/^57\.09\./.test(c) || /carbur|lubrif|telefon|energia|elettric|gas\b|acqua/.test(d)) return { r: "RE014001" };
+  if (/carbur|lubrif|telefon|energia|elettric|\bgas\b|acqua|riscald|radiomobil|telematic/.test(d)) return { r: "RE014001" };
   if (/\bimu\b|municipale/.test(d)) return { r: "RE019003" };
   return { r: "RE019004" };
 }
@@ -6265,6 +6278,263 @@ function renderDicRE() {
   $("#dic-valutare").innerHTML = val.length ? val.map(v => `<tr><td class="mono">${esc(v.c)}</td><td>${esc(v.c === "IVA" ? "Dichiarazione IVA" : /^RE\d/.test(v.c) ? "Limite del quadro RE" : v.c === "Ripresa" ? "Ripresa saldi" : descConto(v.c))}</td><td class="num">${v.s ? num(Math.abs(v.s)) : "–"}</td><td>${esc(v.nota)}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">Nessun conto da valutare.</td></tr>`;
 }
+
+/* ======================= IMPORTAZIONE DELLA CONTABILITÀ DA PROFIS =======================
+   File Excel esportati da Profis (Sistemi), riconosciuti dal contenuto:
+   - libro giornale / prima nota: ditta, anno, riferimento documento ("Ft 1  7/01/26"), tipo documento, data e numero di
+     registrazione, causale ("201-Ft.", "502-Pn"…), conto, codice e nome del cliente o fornitore, descrizione, dare, avere;
+   - registri IVA: registro (Acquisti, Vendite), documento, codice IVA, imponibile, imposta, totale, IVA detraibile.
+   I conti di Profis sono quelli del piano S1 o SP_SIS: si riportano con lo stesso codice. Incassi e pagamenti si abbinano
+   alle fatture dal riferimento nella descrizione ("Incasso Ft 1  7/01/26"), altrimenti per importo. */
+let PRF = { G: null, IVA: null, file: {} };
+const prfMsg = (t, cls) => { const el = $("#prf-msg"); if (el) { el.textContent = t; el.className = "hint " + (cls || ""); } };
+const prfNorm = s => String(s ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+const prfNum = v => typeof v === "number" ? v : bluNum(v);
+function prfRif(ref) {
+  const m = String(ref || "").replace(/\s+/g, " ").trim().match(/^(\S+)\s*(.*?)\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!m) return { num: String(ref || "").trim(), data: "" };
+  const y = m[5].length === 2 ? "20" + m[5] : m[5];
+  return { tipo: m[1], num: m[2].trim(), data: `${y}-${m[4].padStart(2, "0")}-${m[3].padStart(2, "0")}` };
+}
+function prfTipo(righe) {
+  const dati = righe.filter(r => r && r.length >= 15);
+  const g = dati.filter(r => /^\d{2}(\.\d{2}){1,3}$/.test(String(r[9]).trim()) && /^\d+-/.test(String(r[8]).trim()));
+  if (g.length >= 3 && g.length >= dati.length * 0.8) return "giornale";
+  const v = righe.filter(r => r && r.length >= 19 && /^(acquisti|vendite|corrispettivi)$/i.test(String(r[5]).trim()) && typeof r[16] === "number");
+  if (v.length >= 3) return "registri";
+  return "";
+}
+function prfLeggiGiornale(righe) {
+  const regs = []; let cur = null, chiave = "";
+  for (const r of righe) {
+    if (!r || r.length < 15 || !/^\d{2}(\.\d{2}){1,3}$/.test(String(r[9]).trim())) continue;
+    const k = [r[6], r[7], r[8], r[4]].join("|");
+    if (!cur || k !== chiave) {
+      chiave = k;
+      cur = { data: bluSerial(r[6]), num: String(r[7]).trim(), caus: String(r[8]).trim(), ref: prfNorm(r[4]), tdoc: String(r[5] || "").trim(), ditta: String(r[0] || "").trim(), righe: [] };
+      regs.push(cur);
+    }
+    cur.righe.push({ cod: String(r[9]).trim(), an: Number(r[10]) || 0, nome: String(r[11] || "").trim(), desc: String(r[12] || "").trim(), dare: r2(prfNum(r[13])), avere: r2(prfNum(r[14])) });
+  }
+  return regs;
+}
+function prfLeggiRegistri(righe) {
+  const m = new Map();
+  for (const r of righe) {
+    if (!r || !/^(acquisti|vendite|corrispettivi)$/i.test(String(r[5]).trim())) continue;
+    const reg = /^v/i.test(r[5]) ? "V" : /^a/i.test(r[5]) ? "A" : "C";
+    const k = `${reg}|${Number(r[12]) || 0}|${prfNorm(r[11])}`;
+    const x = m.get(k) || { reg, an: Number(r[12]) || 0, nome: String(r[13] || ""), ref: prfNorm(r[11]), tot: r2(prfNum(r[18])), righe: [] };
+    x.righe.push({ cod: String(r[14] || "").trim(), desc: String(r[15] || "").trim(), imp: r2(prfNum(r[16])), iva: r2(prfNum(r[17])), detr: r2(prfNum(r[23])), nota: String(r[19] || "") });
+    m.set(k, x);
+  }
+  return m;
+}
+/* codice IVA di Profis → codice IVA o natura della contabilità */
+function prfCodIva(c, d) {
+  const cc = String(c).toUpperCase(), dd = String(d).toUpperCase();
+  if (/^\d+(\.\d+)?$/.test(cc)) return { cod: String(Number(cc)) };
+  const al = cc.match(/^(\d+)/);
+  if (al && /17\s*C?\.?\s*6|PRESA|REVERSE|INV/.test(dd + " " + cc)) return { cod: String(Number(al[1])), rc: true, nat: /A ?TER|176AT|AT$/.test(dd + cc) ? "N6.7" : "N6.9" };
+  if (/^E|ESENT|ES\.ART|ART\.?\s*10/.test(cc + " " + dd) && !/ESC/.test(dd)) return { cod: "N4" };
+  if (/ESC\.?15|ART\.?\s*15/.test(dd)) return { cod: "N1" };
+  if (/ESCLUS|FUORI|F\.C\./.test(dd)) return { cod: "N2.2" };
+  if (/NON IMP|N\.I\./.test(dd)) return { cod: "N3.6" };
+  return { cod: "N2.2" };
+}
+function prfCausale(R) {
+  const t = (R.tdoc + " " + R.caus).toLowerCase(), cli = R.righe.filter(x => /^11\.03\./.test(x.cod) && x.an), forn = R.righe.filter(x => /^33\.03\./.test(x.cod) && x.an);
+  if (/nota (di )?credito.*vendit|nc\.?\s*vend/.test(t)) return "NE";
+  if (/nota (di )?credito/.test(t)) return forn.length ? "NR" : cli.length ? "NE" : "GEN";
+  if (/vendit/.test(t) || (/fattur/.test(t) && cli.length && !forn.length)) return "FE";
+  if (/acquist|fuori ambito|17 ?c\.? ?6|fattur|costi/.test(t) && forn.length) return "FR";
+  if (/corrispett/.test(t)) return "CO";
+  if (/f24|f\.24/.test(t + " " + R.righe.map(x => x.desc).join(" ").toLowerCase())) return "F24";
+  if (cli.some(x => x.avere > 0) && !forn.length) return "INC";
+  if (forn.some(x => x.dare > 0) && !cli.length) return "PAG";
+  return "GEN";
+}
+function prfAnalizza() {
+  const G = PRF.G; if (!G) return null;
+  const anni = new Map(); for (const R of G) { const y = R.data.slice(0, 4); anni.set(y, (anni.get(y) || 0) + 1); }
+  const conti = new Map();
+  for (const R of G) for (const x of R.righe) if (!x.an || !/^(11|33)\.03\./.test(x.cod)) { const c = conti.get(x.cod) || { cod: x.cod, d: x.nome, n: 0 }; c.n++; conti.set(x.cod, c); }
+  const manc = [...conti.values()].filter(c => !contoOk(foglia(c.cod)));
+  // conti che Profis usa ma che il piano dell'azienda non ha: si aggiungono al piano dell'azienda con la descrizione di Profis
+  const padre = c => { const p = c.split("."); for (let i = p.length - 1; i > 0; i--) { const k = p.slice(0, i).join("."); if (PDC.has(k)) return PDC.get(k); } return null; };
+  const creabili = manc.filter(c => /^\d{2}(\.\d{2}){2,3}$/.test(c.cod) && padre(c.cod)).map(c => ({ ...c, padre: padre(c.cod), base: BASE.get(c.cod) || null }));
+  const mancanti = manc.filter(c => !creabili.some(x => x.cod === c.cod));
+  const cau = new Map(); for (const R of G) { const c = prfCausale(R); cau.set(c, (cau.get(c) || 0) + 1); }
+  const sbil = G.filter(R => Math.abs(R.righe.reduce((s, x) => s + x.dare - x.avere, 0)) >= 0.005);
+  const nomi = new Set(); for (const R of G) for (const x of R.righe) if (x.an && /^(11|33)\.03\./.test(x.cod)) nomi.add(x.cod.slice(0, 2) + "|" + x.an);
+  return { anni, conti, mancanti, creabili, cau, sbil, nAnag: nomi.size, prima: G.reduce((m, R) => !m || R.data < m ? R.data : m, ""), ultima: G.reduce((m, R) => R.data > m ? R.data : m, ""), ditta: G[0]?.ditta || "" };
+}
+function prfErrori(A) {
+  const e = [];
+  if (!aziendaCorrente()) e.push("Seleziona l'azienda");
+  if (!PRF.G) e.push("Manca il libro giornale di Profis");
+  if (A) {
+    if (!A.anni.has(String(S.anno))) e.push(`Il giornale non contiene registrazioni dell'esercizio ${S.anno}: scegli l'anno giusto in alto`);
+    if (A.mancanti.length) e.push(`${A.mancanti.length} conti non presenti nel piano dei conti dell'azienda (${A.mancanti.slice(0, 5).map(c => c.cod).join(", ")}${A.mancanti.length > 5 ? "…" : ""}): aggiungili nel Piano dei conti${aziendaCorrente() && !isProf(aziendaCorrente()) && SEMPL ? " o imposta il tipo di reddito «Lavoro autonomo» se è un professionista" : ""}`);
+    if (A.sbil.length) e.push(`${A.sbil.length} registrazioni con dare e avere diversi`);
+  }
+  return e;
+}
+let prfInCorso = false;
+function renderPrf() {
+  const box = $("#prf-card"); if (!box) return;
+  const A = prfAnalizza(), err = prfErrori(A), righe = [];
+  const f = PRF.file;
+  righe.push(`<div><span>Libro giornale (prima nota) <span class="pill media">necessario</span></span><span class="mono">${f.G ? `${esc(f.G.nome)} · ${f.G.n} registrazioni` : "–"}</span></div>`);
+  righe.push(`<div><span>Registri IVA</span><span class="mono">${f.IVA ? `${esc(f.IVA.nome)} · ${f.IVA.n} documenti` : "facoltativi: senza, le registrazioni non entrano nei registri IVA"}</span></div>`);
+  if (A) {
+    righe.push(`<div><span>${esc(A.ditta)} · registrazioni dal ${itDate(A.prima)} al ${itDate(A.ultima)}</span><span class="mono">${[...A.cau].map(([c, n]) => `${esc(CAUSALI[c] || c)} ${n}`).join(" · ")}</span></div>`);
+    righe.push(`<div><span>Clienti e fornitori · conti movimentati</span><span class="mono">${A.nAnag} · ${A.conti.size}</span></div>`);
+    if (A.creabili.length) righe.push(`<div><span>Conti di Profis da aggiungere al piano dei conti dell'azienda</span><span class="mono">${A.creabili.map(c => `${esc(c.cod)} ${esc(c.d)}`).join(" · ")}</span></div>`);
+  }
+  if (A || PRF.IVA) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">Pronto per l'importazione nell'esercizio ${S.anno}</span><span></span></div>`);
+  $("#prf-riepilogo").innerHTML = righe.join("");
+  $("#prf-importa").disabled = !!err.length || prfInCorso;
+}
+async function prfCarica(files) {
+  if (!aziendaCorrente()) return prfMsg("Crea o seleziona prima l'azienda", "err");
+  const letti = [];
+  for (const f of files) {
+    prfMsg(`Lettura di ${f.name}…`, "work");
+    try {
+      const { righe } = await bluFoglio(f), t = prfTipo(righe);
+      if (t === "giornale") { PRF.G = prfLeggiGiornale(righe); PRF.file.G = { nome: f.name, n: PRF.G.length }; letti.push(`${f.name}: libro giornale, ${PRF.G.length} registrazioni`); }
+      else if (t === "registri") { PRF.IVA = prfLeggiRegistri(righe); PRF.file.IVA = { nome: f.name, n: PRF.IVA.size }; letti.push(`${f.name}: registri IVA, ${PRF.IVA.size} documenti`); }
+      else letti.push(`${f.name}: non è un libro giornale né un registro IVA esportato da Profis`);
+    } catch (e) { letti.push(`${f.name}: ${e.message || "file non leggibile"}`); }
+  }
+  renderPrf();
+  prfMsg(letti.join(" · "), letti.some(x => /non /.test(x)) ? "work" : "ok");
+}
+async function prfImporta() {
+  const A = prfAnalizza(), err = prfErrori(A); if (err.length) return prfMsg(err[0], "err");
+  prfInCorso = true; renderPrf();
+  const msg = t => { const el = $("#prf-imp-msg"); if (el) el.textContent = t; };
+  const az = aziendaCorrente(), rid = uid(), adesso = new Date().toISOString(), anno = S.anno, Y = String(anno), out = [], avvisi = [];
+  try {
+    const G = PRF.G.filter(R => R.data.slice(0, 4) === Y);
+    /* 0. conti mancanti nel piano dell'azienda */
+    for (const c of A.creabili) {
+      const b = c.base, p = c.padre, eco = /^(4[7-9]|[5-8]\d)\./.test(c.cod), ric = /^(47|53|73|77)\./.test(c.cod);
+      const o = { id: `${S.aziendaId}~${c.cod}`, scope: S.aziendaId, codice: c.cod, d: c.d || b?.d || c.cod, t: b?.t || (eco ? "E" : "P"), s: b?.s || (eco ? (ric ? "R" : "C") : p.s || "X"),
+        vd: b?.vd || p.vd || "", va: b?.va || p.va || "", ded: b?.ded ?? (eco && !ric ? "100" : ""), fis: b?.fis ?? (eco && !ric ? "Deducibile secondo le regole ordinarie" : ""), eliminato: false, aggiornato: adesso, fonte: "profis" };
+      await store.put("pdc", o);
+      if (!S.pdcOv.some(x => x.id === o.id)) S.pdcOv.push(o);
+    }
+    if (A.creabili.length) ricostruisciPdc();
+    /* 1. anagrafiche */
+    const anag = new Map();   // "C|codice" → anagrafica
+    for (const R of G) for (const x of R.righe) {
+      if (!x.an || !/^(11|33)\.03\./.test(x.cod)) continue;
+      const tipo = x.cod.startsWith("11") ? "C" : "F", k = `${tipo}|${x.an}`; if (anag.has(k)) continue;
+      let a = S.anag.find(y => y.tipo === tipo && String(y.codProfis) === String(x.an)) || trovaAnag(tipo, { nome: x.nome });
+      if (!a) { a = { id: uid(), aziendaId: S.aziendaId, tipo, denominazione: x.nome, piva: "", cf: "", conto: "", codProfis: x.an, creato: adesso, fonte: "profis" }; out.push(["anagrafiche", a]); }
+      else if (!a.codProfis) { a = { ...a, codProfis: x.an }; out.push(["anagrafiche", a]); }
+      anag.set(k, a);
+    }
+    const anDi = x => x.an && /^(11|33)\.03\./.test(x.cod) ? anag.get(`${x.cod.startsWith("11") ? "C" : "F"}|${x.an}`) : null;
+    const base = { iva: [], fonte: "profis", file: PRF.file.G?.nome || "Profis", ripresaId: rid, aziendaId: S.aziendaId, anno, creato: adesso };
+    const nuovaReg = o => ({ ...base, iva: [], abbinamenti: [], ...o, trim: trimDi(o.dataReg), mese: Number(o.dataReg.slice(5, 7)) });
+    const esistenti = new Set(tutteRegs().map(r => r.chiave).filter(Boolean));
+    /* 2. registrazioni */
+    const regs = [], docs = [], gia = []; let nIva = 0, senzaIva = 0;
+    for (const R of G) {
+      const causale = prfCausale(R), rif = prfRif(R.ref), chiave = `PRF|${R.data}|${R.caus}|${R.num}|${R.ref}`;
+      if (esistenti.has(chiave)) { gia.push(R); continue; }
+      const righe = R.righe.map(x => { const a = anDi(x); return riga(foglia(x.cod), x.dare, x.avere, a ? { anagId: a.id } : undefined); });
+      const ans = [...new Set(R.righe.map(anDi).filter(Boolean))], an = ans.length === 1 ? ans[0] : null;
+      const descr = R.tdoc ? `${R.tdoc} ${R.ref ? R.ref.replace(/^\S+\s*/, "") : ""}`.trim() : (R.righe.find(x => x.an)?.desc || R.righe[0]?.desc || "Prima nota");
+      const reg = nuovaReg({ id: uid(), causale, dataReg: R.data, dataDoc: rif.data || R.data, numDoc: rif.num || "", descr: `${descr}${an ? ` · ${an.denominazione}` : ""}`, righe, chiave, numProfis: R.num, causaleProfis: R.caus });
+      if (an) { reg.anagId = an.id; reg.anagNome = an.denominazione; }
+      // documento: partita aperta per il criterio di cassa
+      if (an && ["FE", "FR", "NE", "NR"].includes(causale)) {
+        const t = an.tipo, tot = r2(R.righe.filter(x => anDi(x) === an).reduce((s, x) => s + (t === "C" ? x.dare - x.avere : x.avere - x.dare), 0));
+        reg.partita = { tipo: t, totale: tot, ritenuta: 0, scadenza: "" };
+        docs.push({ reg, an, ref: R.ref, residuo: tot });
+        // righe dei registri IVA
+        const ivaV = PRF.IVA?.get(`V|${R.righe.find(x => x.an)?.an || 0}|${R.ref}`), ivaA = PRF.IVA?.get(`A|${R.righe.find(x => x.an)?.an || 0}|${R.ref}`);
+        const sg = ["NE", "NR"].includes(causale) ? -1 : 1, ivaInGiornale = R.righe.some(x => /^35\.01\.0[1-3]$/.test(x.cod) && (x.dare || x.avere));
+        const detrSi = R.righe.some(x => x.cod === K.ivaAcq && x.dare > 0);
+        if (causale === "FE" || causale === "NE") for (const v of ivaV?.righe || []) { const c = prfCodIva(v.cod, v.desc); reg.iva.push({ reg: "V", cod: c.cod, imp: r2(v.imp * sg), iva: r2(v.iva * sg), detr: 0, esig: "I", rc: false }); }
+        else {
+          for (const v of ivaA?.righe || []) {
+            const c = prfCodIva(v.cod, v.desc), rcRid = c.rc ? uid() : null;
+            reg.iva.push({ reg: "A", cod: c.cod, imp: r2(v.imp * sg), iva: r2(v.iva * sg), detr: detrSi ? r2(v.detr * sg) : 0, esig: "I", rc: !!c.rc, nat: c.nat || (c.cod.startsWith("N") ? c.cod : ""), td: c.rc ? "TD16" : "", ...(rcRid ? { rid: rcRid } : {}) });
+            if (c.rc) reg.iva.push({ reg: "V", cod: c.cod, imp: r2(v.imp * sg), iva: r2(v.iva * sg), detr: 0, esig: "I", rc: true, rid: rcRid, td: "TD16" });
+          }
+          if (!ivaA && ivaInGiornale) avvisi.push(`${descr}: IVA nel giornale ma documento non trovato nei registri`);
+        }
+        if (reg.iva.length) nIva++; else if (PRF.IVA && !/fuori ambito|costi fuori/i.test(R.tdoc)) senzaIva++;
+      }
+      reg._R = R; regs.push(reg);
+    }
+    /* 3. abbinamenti di incassi e pagamenti */
+    const perAn = new Map(); for (const d of docs) { const k = d.an.id; if (!perAn.has(k)) perAn.set(k, []); perAn.get(k).push(d); }
+    // anche i documenti già in contabilità (per esempio fatture importate dagli XML)
+    for (const r of S.regs) if (r.partita && r.anagId) { const res = r2(r.partita.totale - abbinatoA(r.id)); if (Math.abs(res) >= 0.01) { if (!perAn.has(r.anagId)) perAn.set(r.anagId, []); perAn.get(r.anagId).push({ reg: r, an: S.anag.find(a => a.id === r.anagId), ref: "", residuo: res }); } }
+    const liberi = { C: 0, F: 0 }; let nAbb = 0, perImporto = 0;
+    for (let i = 0; i < regs.length; i++) {
+      const reg = regs[i], R = reg._R; if (reg.partita || !R) continue;
+      for (const x of R.righe) {
+        const a = anDi(x); if (!a) continue;
+        const imp = r2(a.tipo === "C" ? x.avere - x.dare : x.dare - x.avere); if (imp <= 0.004) continue;
+        const ref = prfNorm((x.desc.match(/(?:incasso|pagamento|inc\.|pag\.|saldo|acconto)\s+(.+)$/i) || [])[1] || "");
+        const cand = (perAn.get(a.id) || []).filter(d => d.residuo > 0.004);
+        let d = ref && cand.find(d => d.ref === ref && d.residuo + 0.004 >= imp);
+        if (!d) { d = cand.find(d => Math.abs(d.residuo - imp) < 0.005) || cand.find(d => d.residuo + 0.004 >= imp); if (d) perImporto++; }
+        if (!d) { liberi[a.tipo] = r2(liberi[a.tipo] + imp); reg._libero = (reg._libero || []).concat([{ tipo: a.tipo, imp }]); continue; }
+        reg.abbinamenti.push({ regId: d.reg.id, importo: r2(imp) }); d.residuo = r2(d.residuo - imp); nAbb++;
+      }
+    }
+    /* 4. incassi e pagamenti di documenti di anni precedenti: partita generica al 1° gennaio */
+    const regsApe = [];
+    for (const t of ["C", "F"]) {
+      const tot = liberi[t]; if (tot < 0.01) continue;
+      const nome = t === "C" ? "Clienti diversi (partite al 1° gennaio da Profis)" : "Fornitori diversi (partite al 1° gennaio da Profis)";
+      let a = S.anag.find(x => x.tipo === t && x.denominazione === nome);
+      if (!a) { a = { id: uid(), aziendaId: S.aziendaId, tipo: t, denominazione: nome, piva: "", cf: "", conto: "", creato: adesso, fonte: "profis" }; out.push(["anagrafiche", a]); }
+      const cAn = t === "C" ? K.clienti : K.fornitori, cRip = t === "C" ? RIP_CONTI.partC : RIP_CONTI.partF;
+      const anR = riga(cAn, t === "C" ? tot : 0, t === "C" ? 0 : tot, { anagId: a.id }), ripR = riga(cRip, anR.avere, anR.dare);
+      const ap = nuovaReg({ id: uid(), causale: "AP", dataReg: `${Y}-01-01`, dataDoc: `${Y}-01-01`, numDoc: "", descr: "Partite aperte al 1° gennaio (da Profis, non dettagliate)", anagId: a.id, anagNome: a.denominazione, righe: t === "C" ? [anR, ripR] : [ripR, anR], partita: { tipo: t, totale: tot, ritenuta: 0, scadenza: "" }, chiave: `PRF|${Y}|AP${t}`, generica: true });
+      regsApe.push(ap);
+      for (const r of regs) for (const l of r._libero || []) if (l.tipo === t) { r.abbinamenti.push({ regId: ap.id, importo: l.imp }); nAbb++; }
+    }
+    for (const r of regs) { delete r._libero; delete r._R; }
+    /* 5. scrittura */
+    const tutte = regsApe.concat(regs);
+    for (const r of tutte) { const e = erroriReg(r); if (e.length) throw new Error(`${r.descr} del ${itDate(r.dataReg)}: ${e[0]}`); }
+    for (const r of tutte) out.push(["registrazioni", r]);
+    msg(`Salvataggio di ${out.length} documenti…`);
+    await bluScrivi(out, (i, n) => msg(`Salvataggio… ${i} di ${n}`));
+    if (!S.db && !lsLoad().registrazioni.some(r => r.id === tutte[tutte.length - 1].id)) throw new Error("lo spazio del browser non basta per salvare tutte le registrazioni: apri la contabilità dentro Claude o dal portale con l'archivio condiviso");
+    const azN = { ...aziendaCorrente(), importProfis: { id: rid, data: A.ultima, n: tutte.length, anno, file: PRF.file.G?.nome || "", creato: adesso } };
+    // professionista con sole operazioni esenti: senza IVA a credito nel giornale l'IVA sugli acquisti è indetraibile
+    if (!G.some(R => R.righe.some(x => x.cod === K.ivaAcq && x.dare > 0)) && G.some(R => prfCausale(R) === "FR")) azN.detrazione = 0;
+    await store.put("aziende", azN);
+    log("Importazione Profis", `${regs.length} registrazioni, ${anag.size} clienti e fornitori, ${nAbb} abbinamenti`, "ok");
+    PRF = { G: null, IVA: null, file: {} }; renderPrf(); msg("");
+    prfMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(A.ultima)}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti abbinati alle fatture${perImporto ? ` (${perImporto} per importo, perché il riferimento nella descrizione non corrispondeva)` : ""}${liberi.C + liberi.F ? `; ${num(liberi.C)} € di incassi e ${num(liberi.F)} € di pagamenti di documenti di anni precedenti su partite generiche al 1° gennaio` : ""}${nIva ? `; ${nIva} documenti nei registri IVA` : ""}${senzaIva ? `, ${senzaIva} senza righe IVA` : ""}${gia.length ? `; ${gia.length} registrazioni erano già state importate` : ""}${avvisi.length ? `. Da controllare: ${avvisi.slice(0, 3).join("; ")}` : ""}.`, "ok");
+  } catch (e) {
+    msg(""); prfMsg(`Importazione non riuscita: ${e.message || e}`, "err");
+  } finally { prfInCorso = false; renderPrf(); }
+}
+(() => {
+  const d = $("#drop-prf"), inp = $("#in-prf"); if (!d) return;
+  d.addEventListener("click", () => inp.click());
+  d.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inp.click(); } });
+  ["dragenter", "dragover"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.remove("over"); }));
+  d.addEventListener("drop", e => { const f = [...(e.dataTransfer?.files || [])]; if (f.length) prfCarica(f); });
+  inp.addEventListener("change", () => { const f = [...inp.files]; inp.value = ""; if (f.length) prfCarica(f); });
+  $("#prf-svuota").addEventListener("click", () => { PRF = { G: null, IVA: null, file: {} }; renderPrf(); prfMsg(""); });
+  $("#prf-importa").addEventListener("click", prfImporta);
+  renderPrf();
+})();
 
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
