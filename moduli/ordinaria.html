@@ -1798,6 +1798,105 @@ function combo(inputId, listId, getMap, onPick) {
   list.addEventListener("mousedown", e => { const li = e.target.closest("li[data-code]"); if (!li) return; e.preventDefault(); onPick(li.dataset.code); chiudi(); });
 }
 
+/* ======================= FATTURE ESTERE: INTEGRAZIONE / AUTOFATTURA XML (TD17, TD18, TD19) =======================
+   Dalla fattura di un fornitore estero (letta dal PDF) si prepara il file FatturaPA 1.2 dell'integrazione da inviare allo SdI:
+   - TD17 integrazione/autofattura per acquisto di servizi dall'estero (art. 17, c. 2, DPR 633/72; art. 7-ter);
+   - TD18 integrazione per acquisto di beni intracomunitari (artt. 46 e 47 DL 331/93);
+   - TD19 integrazione/autofattura per acquisto di beni ex art. 17, c. 2, già presenti in Italia.
+   Il cedente/prestatore è il fornitore estero, il cessionario/committente è il cliente dello Studio; SoggettoEmittente CC.
+   Aliquota del 22% salvo diversa indicazione; ImportoTotaleDocumento = imponibile (l'imposta è nel riepilogo). */
+const AF_UE = ["AT", "BE", "BG", "CY", "HR", "DK", "EE", "FI", "FR", "DE", "GR", "EL", "IE", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "CZ", "RO", "SK", "SI", "ES", "SE", "HU"];
+const AF_TD = { TD17: "Integrazione/autofattura per acquisto servizi dall'estero", TD18: "Integrazione per acquisto di beni intracomunitari", TD19: "Integrazione/autofattura per acquisto di beni ex art. 17 c. 2 DPR 633/72" };
+const AF_NORMA = { TD17: "Inversione contabile art. 17, c. 2, DPR 633/72 (servizi art. 7-ter)", TD18: "Integrazione artt. 46 e 47 DL 331/93 (acquisto intracomunitario di beni)", TD19: "Autofattura art. 17, c. 2, DPR 633/72 (beni già in Italia)" };
+/* tipo di integrazione dal Paese del fornitore e dall'oggetto: null se non serve (fornitore italiano o beni importati con bolla doganale) */
+function afTipo(paese, oggetto, beniInItalia) {
+  const p = String(paese || "").toUpperCase(); if (!p || p === "IT" || p === "SM" || p === "VA") return null;
+  if (oggetto !== "beni") return "TD17";
+  if (AF_UE.includes(p)) return "TD18";
+  return "TD19";   // beni extra UE: solo se già presenti in Italia; quelli importati passano dalla dogana
+}
+const afX = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c])).replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€]/g, "").trim();
+const afN = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+const afTag = (t, v, max) => v === "" || v == null ? "" : `<${t}>${afX(max ? String(v).slice(0, max) : v)}</${t}>`;
+/* identificativo IVA estero: senza prefisso del Paese; se manca (fornitore extra UE) un codice convenzionale */
+function afVat(paese, vat) {
+  let v = String(vat || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const p = String(paese || "").toUpperCase();
+  if (v.startsWith(p)) v = v.slice(p.length);
+  if (p === "GR" && v.startsWith("EL")) v = v.slice(2);
+  return v.slice(0, 28) || "99999999999";
+}
+/* numero dell'integrazione: TD17-2026/001, progressivo per tipo e anno */
+function afNumero(td, anno, usati) {
+  const re = new RegExp(`^${td}-${anno}/(\\d+)$`), n = (usati || []).map(x => Number((String(x).match(re) || [])[1]) || 0);
+  return `${td}-${anno}/${String((n.length ? Math.max(...n) : 0) + 1).padStart(3, "0")}`;
+}
+/* o = { td, numero, data, progressivo, cessionario:{denominazione|nome+cognome, piva, cf, indirizzo, cap, comune, prov},
+         fornitore:{nome, paese, vat, indirizzo, comune}, rif:{numero, data}, righe:[{descr, imp, aliquota, natura}], causale } */
+function afXml(o) {
+  const C = o.cessionario || {}, F = o.fornitore || {}, paese = String(F.paese || "").toUpperCase().slice(0, 2) || "OO";
+  const piva = String(C.piva || "").replace(/\D/g, ""), prog = String(o.progressivo || "00001").replace(/[^A-Za-z0-9]/g, "").slice(-5).padStart(5, "0");
+  const righe = (o.righe || []).filter(r => Number(r.imp)).map(r => ({ descr: r.descr || "Acquisto", imp: Math.round(r.imp * 100) / 100, al: Number(r.aliquota ?? 22), nat: r.natura || "" }));
+  const riep = new Map();
+  for (const r of righe) { const k = r.al + "|" + (r.al ? "" : r.nat); const e = riep.get(k) || { al: r.al, nat: r.al ? "" : r.nat, imp: 0 }; e.imp += r.imp; riep.set(k, e); }
+  const tot = righe.reduce((s, r) => s + r.imp, 0);
+  const nome = C.denominazione ? `<Denominazione>${afX(C.denominazione).slice(0, 80)}</Denominazione>` : `<Nome>${afX(C.nome).slice(0, 60)}</Nome><Cognome>${afX(C.cognome).slice(0, 60)}</Cognome>`;
+  const cf = String(C.cf || "").toUpperCase().replace(/\s/g, "");
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2 http://www.fatturapa.gov.it/export/fatturazione/sdi/fatturapa/v1.2/Schema_del_file_xml_FatturaPA_versione_1.2.xsd">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>${afX(piva || cf)}</IdCodice></IdTrasmittente>
+      <ProgressivoInvio>${prog}</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>0000000</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>${afX(paese === "GR" ? "EL" : paese)}</IdPaese><IdCodice>${afX(afVat(paese, F.vat))}</IdCodice></IdFiscaleIVA>
+        <Anagrafica><Denominazione>${afX(F.nome || "Fornitore estero").slice(0, 80)}</Denominazione></Anagrafica>
+        <RegimeFiscale>RF18</RegimeFiscale>
+      </DatiAnagrafici>
+      <Sede><Indirizzo>${afX(F.indirizzo || "Indirizzo estero").slice(0, 60)}</Indirizzo><CAP>00000</CAP><Comune>${afX(F.comune || "Estero").slice(0, 60)}</Comune><Nazione>${afX(paese === "EL" ? "GR" : paese)}</Nazione></Sede>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        ${piva ? `<IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>${piva}</IdCodice></IdFiscaleIVA>` : ""}${cf ? `<CodiceFiscale>${afX(cf)}</CodiceFiscale>` : ""}
+        <Anagrafica>${nome}</Anagrafica>
+      </DatiAnagrafici>
+      <Sede><Indirizzo>${afX(C.indirizzo || "").slice(0, 60)}</Indirizzo><CAP>${afX(String(C.cap || "").replace(/\D/g, "").padStart(5, "0").slice(0, 5))}</CAP><Comune>${afX(C.comune || "").slice(0, 60)}</Comune>${C.prov ? `<Provincia>${afX(String(C.prov).toUpperCase().slice(0, 2))}</Provincia>` : ""}<Nazione>IT</Nazione></Sede>
+    </CessionarioCommittente>
+    <SoggettoEmittente>CC</SoggettoEmittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>${o.td}</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>${afX(o.data)}</Data>
+        <Numero>${afX(o.numero).slice(0, 20)}</Numero>
+        <ImportoTotaleDocumento>${afN(tot)}</ImportoTotaleDocumento>
+        <Causale>${afX(o.causale || `${AF_TD[o.td]} - ${AF_NORMA[o.td]}`).slice(0, 200)}</Causale>
+      </DatiGeneraliDocumento>
+      ${o.rif && o.rif.numero ? `<DatiFattureCollegate><IdDocumento>${afX(o.rif.numero).slice(0, 20)}</IdDocumento>${o.rif.data ? `<Data>${afX(o.rif.data)}</Data>` : ""}</DatiFattureCollegate>` : ""}
+    </DatiGenerali>
+    <DatiBeniServizi>
+${righe.map((r, i) => `      <DettaglioLinee><NumeroLinea>${i + 1}</NumeroLinea><Descrizione>${afX(`${r.descr} - ${AF_NORMA[o.td]}`).slice(0, 1000)}</Descrizione><PrezzoUnitario>${afN(r.imp)}</PrezzoUnitario><PrezzoTotale>${afN(r.imp)}</PrezzoTotale><AliquotaIVA>${afN(r.al)}</AliquotaIVA>${r.al ? "" : `<Natura>${afX(r.nat || "N4")}</Natura>`}</DettaglioLinee>`).join("\n")}
+${[...riep.values()].map(e => `      <DatiRiepilogo><AliquotaIVA>${afN(e.al)}</AliquotaIVA>${e.al ? "" : `<Natura>${afX(e.nat || "N4")}</Natura>`}<ImponibileImporto>${afN(e.imp)}</ImponibileImporto><Imposta>${afN(e.imp * e.al / 100)}</Imposta>${e.al ? "<EsigibilitaIVA>I</EsigibilitaIVA>" : ""}</DatiRiepilogo>`).join("\n")}
+    </DatiBeniServizi>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>
+`;
+  return { xml, nome: `IT${piva || cf}_${prog}.xml`, imponibile: Math.round(tot * 100) / 100, imposta: Math.round([...riep.values()].reduce((s, e) => s + Math.round(e.imp * e.al) / 100, 0) * 100) / 100 };
+}
+/* progressivo d'invio: 5 caratteri alfanumerici dal numero dell'integrazione */
+function afProgressivo(numero) { const m = String(numero || "").match(/^TD(\d\d)-(\d{4})\/(\d+)$/); return m ? ({ 17: "Q", 18: "R", 19: "S" }[m[1]] || "T") + m[2].slice(-1) + String(Number(m[3]) % 1000).padStart(3, "0") : "T" + String(Date.now()).slice(-4); }
+async function afScarica(nome, xml, downloads) {
+  if (downloads) { try { await downloads.save({ filename: nome, data: xml }); return "salvato"; } catch { return "annullato"; } }
+  try { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([xml], { type: "application/xml" })); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); return "salvato"; }
+  catch { return "non disponibile"; }
+}
+
 /* ---------- movimenti bancari ---------- */
 function parseDataIt(s) {
   s = String(s || "").trim();
@@ -2073,8 +2172,8 @@ async function agenteFattura(name, text, images) {
   const prompt = `Sei l'addetto alla contabilità di uno studio commercialista italiano. Leggi la fattura ${images ? "nelle immagini allegate" : "riportata sotto"} ed estrai i dati.
 L'azienda di cui teniamo la contabilità è ${az.denominazione}, partita IVA ${az.piva || "non indicata"}. Se l'azienda è il cedente o prestatore la fattura è "emessa", se è il cessionario o committente è "ricevuta".
 Rispondi solo con un oggetto JSON di questa forma:
-{"ruolo":"ricevuta","tipoDocumento":"TD01","numero":"","data":"AAAA-MM-GG","controparte":{"nome":"","piva":"","cf":"","paese":"IT"},"oggetto":"servizi","riepiloghi":[{"aliquota":22,"natura":"","imponibile":0.00,"imposta":0.00}],"bollo":0,"ritenuta":0,"totale":0.00,"descrizioni":["descrizione delle righe"]}
-Regole: importi in euro con il punto decimale; "paese" è il codice ISO a due lettere dello Stato della controparte (dal prefisso della partita IVA o dall'indirizzo); "oggetto" è "beni" o "servizi" secondo ciò che la fattura vende in prevalenza; per la fattura di un fornitore estero senza IVA italiana riporta l'imponibile e imposta 0; "natura" è il codice N1-N7 quando l'aliquota è zero; "tipoDocumento" è TD04 per le note di credito; "bollo" è l'imposta di bollo assolta (di solito 2), altrimenti 0. Non inventare dati: lascia vuoto ciò che non leggi.${text ? `\n\nTesto della fattura:\n<<<\n${text.slice(0, 50000)}\n>>>` : ""}`;
+{"ruolo":"ricevuta","tipoDocumento":"TD01","numero":"","data":"AAAA-MM-GG","valuta":"EUR","beniGiaInItalia":false,"controparte":{"nome":"","piva":"","cf":"","paese":"IT","vat":"","indirizzo":"","citta":""},"oggetto":"servizi","riepiloghi":[{"aliquota":22,"natura":"","imponibile":0.00,"imposta":0.00}],"bollo":0,"ritenuta":0,"totale":0.00,"descrizioni":["descrizione delle righe"]}
+Regole: importi in euro con il punto decimale; "paese" è il codice ISO a due lettere dello Stato della controparte (dal prefisso della partita IVA o dall'indirizzo); per una controparte estera "vat" è il suo identificativo IVA completo come scritto nel documento (per esempio IE6388047V o DE123456789; vuoto se non c'è), "indirizzo" è via e numero e "citta" la città; "valuta" è la valuta della fattura (EUR, USD, GBP…): se non è EUR riporta comunque gli importi in euro solo se il documento li indica, altrimenti gli importi nella valuta originale; "beniGiaInItalia" è true solo se un fornitore extra UE vende beni che si trovano già in Italia (senza importazione doganale); "oggetto" è "beni" o "servizi" secondo ciò che la fattura vende in prevalenza; per la fattura di un fornitore estero senza IVA italiana riporta l'imponibile e imposta 0; "natura" è il codice N1-N7 quando l'aliquota è zero; "tipoDocumento" è TD04 per le note di credito; "bollo" è l'imposta di bollo assolta (di solito 2), altrimenti 0. Non inventare dati: lascia vuoto ciò che non leggi.${text ? `\n\nTesto della fattura:\n<<<\n${text.slice(0, 50000)}\n>>>` : ""}`;
   const o = await chiediJson(name, prompt, images);
   if (!o || typeof o !== "object") return;
   const info = {
@@ -2088,16 +2187,19 @@ Regole: importi in euro con il punto decimale; "paese" è il codice ISO a due le
   const paese = String(o.controparte?.paese || "").toUpperCase().slice(0, 2), UE = ["AT", "BE", "BG", "CY", "HR", "DK", "EE", "FI", "FR", "DE", "GR", "EL", "IE", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "CZ", "RO", "SK", "SI", "ES", "SE", "HU"];
   const estero = info.ruolo === "ricevuta" && paese && paese !== "IT" && paese !== "SM" && paese !== "VA", beni = o.oggetto === "beni";
   const ivaEstera = estero && info.riepiloghi.some(r => r.iva);
-  if (estero && !ivaEstera && info.td !== "TD04" && (UE.includes(paese) || !beni)) { info.td = UE.includes(paese) && beni ? "TD18" : "TD17"; info.rifDoc = info.numero; }
+  if (estero && !ivaEstera && info.td !== "TD04") { const td = afTipo(paese, beni ? "beni" : "servizi"); if (td) { info.td = td; info.rifDoc = info.numero; } }
   const p = propostaFattura(info, "agente", name);
   p.anomalie.push("Dati letti dall'agente: confrontali con il documento");
-  if (estero && ["TD17", "TD18"].includes(info.td) && !p.nonRilevante) {
+  if (estero) p.reg.estero = { paese, vat: String(o.controparte?.vat || o.controparte?.piva || "").trim(), nome: info.controparte.nome, indirizzo: String(o.controparte?.indirizzo || ""), citta: String(o.controparte?.citta || ""), oggetto: beni ? "beni" : "servizi", valuta: String(o.valuta || "EUR").toUpperCase(), descr: info.descrizioni.slice(0, 3).join("; ").slice(0, 300) };
+  if (estero && String(o.valuta || "EUR").toUpperCase() !== "EUR") p.anomalie.push(`Fattura in ${String(o.valuta).toUpperCase()}: converti gli importi in euro al cambio BCE del giorno della fattura prima di registrare e di creare l'integrazione`);
+  if (estero && info.td === "TD19" && !o.beniGiaInItalia) p.anomalie.push("Beni da fornitore extra UE: l'integrazione TD19 serve solo se i beni erano già in Italia; se sono stati importati con bolla doganale l'IVA è assolta in dogana e l'integrazione non va fatta");
+  if (estero && ["TD17", "TD18", "TD19"].includes(info.td) && !p.nonRilevante) {
     const tdGia = docRcGemello(info, r => ["TD17", "TD18", "TD19"].includes(r.iva?.find(v => v.rc)?.td) && !r.rcEsteroPdf);
     if (tdGia) { p.nonRilevante = true; p.anomalie.unshift(`Fattura del fornitore estero già registrata con l'integrazione ${tdGia.iva.find(v => v.rc).td} n. ${tdGia.numDoc}`); }
-    else p.anomalie.push(`Fornitore ${UE.includes(paese) ? "UE" : "extra UE"} (${paese}): registrata come ${info.td} con doppia annotazione e IVA al 22% da verificare; ricorda di inviare l'integrazione ${info.td} allo SdI. Se poi carichi l'XML dell'integrazione non verrà registrato due volte.`);
+    else p.anomalie.push(`Fornitore ${UE.includes(paese) ? "UE" : "extra UE"} (${paese}): registrata come ${info.td} con doppia annotazione e IVA al 22% da verificare; con «XML ${info.td}» crei il file dell'integrazione da inviare allo SdI. Se poi carichi l'XML ricevuto dallo SdI non verrà registrato due volte.`);
   }
   if (ivaEstera) p.anomalie.push(`Il fornitore estero (${paese}) ha addebitato un'imposta: verifica se è IVA estera non detraibile in Italia o un'operazione da integrare`);
-  if (estero && beni && !UE.includes(paese)) p.anomalie.push(`Acquisto di beni da paese extra UE (${paese}): l'IVA si assolve in dogana, registra la bolletta doganale`);
+
   if (!info.data) p.anomalie.push("Data mancante");
   await accoda([p]);
 }
@@ -2407,7 +2509,7 @@ function renderCoda() {
       <td class="num">${num(reg.partita ? Math.abs(reg.partita.totale) : totali(reg).d)}</td>
       <td class="col-scr">${sintesiRighe(reg)}</td>
       <td>${stato}${[...err, ...p.anomalie].map(a => `<div class="anom">${esc(a)}</div>`).join("")}${p.note.map(a => `<div class="sub">${esc(a)}</div>`).join("")}</td>
-      <td><div class="acts">${p.vista ? `<button class="btn small" data-act="vedi" aria-label="Vedi il documento ${esc(reg.numDoc || "")}">Vedi</button>` : ""}<button class="btn small pri" data-act="reg"${p.nonRilevante || err.length ? " disabled" : ""}>Registra</button><button class="btn small" data-act="mod">${p.open ? "Chiudi" : "Modifica"}</button><button class="btn small" data-act="scarta">Scarta</button></div></td></tr>
+      <td><div class="acts">${p.vista ? `<button class="btn small" data-act="vedi" aria-label="Vedi il documento ${esc(reg.numDoc || "")}">Vedi</button>` : ""}${afRegTd(reg) ? `<button class="btn small" data-act="af" title="File XML dell'integrazione da inviare allo SdI">XML ${afRegTd(reg)}</button>` : ""}<button class="btn small pri" data-act="reg"${p.nonRilevante || err.length ? " disabled" : ""}>Registra</button><button class="btn small" data-act="mod">${p.open ? "Chiudi" : "Modifica"}</button><button class="btn small" data-act="scarta">Scarta</button></div></td></tr>
       ${p.open ? `<tr class="ed-row" data-ed="${esc(p.id)}"><td colspan="9"><div class="ed-box" data-nuovo="${esc(p.nuovaAnag && !reg.anagId ? p.nuovaAnag.denominazione : "")}"></div></td></tr>` : ""}`;
   }).join("");
   for (const p of S.coda.filter(p => p.open)) {
@@ -2456,7 +2558,7 @@ function renderPN() {
       return `<tr data-id="${esc(r.id)}"${S.editId === r.id ? ' class="sel"' : ""}><td><input type="checkbox" data-selpn${S.selPN.has(r.id) ? " checked" : ""} aria-label="Seleziona la registrazione"></td><td>${itDate(r.dataReg)}</td><td><span class="pill src">${esc(r.causale)}</span></td><td class="mono">${esc(r.numDoc || "")}</td>
         <td>${esc(r.descr || "")}${r.righe.map(x => `<div class="sub"><span class="mono">${esc(x.conto)}</span> ${esc(descConto(x.conto).slice(0, 40))}${x.anagId ? " · " + esc(S.anag.find(a => a.id === x.anagId)?.denominazione || "") : ""} <span class="mono">${x.dare ? "D " + num(x.dare) : "A " + num(x.avere)}</span></div>`).join("")}${r.partita && r.soloCE ? `<div class="sub">${(r.incassi || []).length ? (r.incassi || []).map(i => `${r.partita.tipo === "C" ? "Incassata" : "Pagata"} il ${itDate(i.data)} <span class="mono">${num(i.importo)}</span>${i.rit ? ` (ritenuta ${num(i.rit)})` : ""}`).join(" · ") : `<span class="pill media">da ${r.partita.tipo === "C" ? "incassare" : "pagare"} ${num(r.partita.totale)}</span>`}</div>` : ""}</td>
         <td class="num">${num(t.d)}</td><td class="num">${num(t.a)}</td><td><span class="pill src">${esc(FONTI[r.fonte] || r.fonte || "")}</span></td>
-        <td><div class="row" style="flex-wrap:nowrap"><button class="btn small" data-act="mod">Modifica</button><button class="btn small danger" data-act="del">Elimina</button></div></td></tr>`;
+        <td><div class="row" style="flex-wrap:nowrap">${afRegTd(r) ? `<button class="btn small" data-act="af" title="File XML dell'integrazione da inviare allo SdI">XML ${afRegTd(r)}</button>` : ""}<button class="btn small" data-act="mod">Modifica</button><button class="btn small danger" data-act="del">Elimina</button></div></td></tr>`;
     }).join("");
     $("#pn-foot").innerHTML = `<tr><td colspan="5">Totale (${list.length} registrazion${list.length === 1 ? "e" : "i"})</td><td class="num">${num(D)}</td><td class="num">${num(A)}</td><td colspan="2">${Math.abs(D - A) < 0.01 ? "" : `<span class="pill bassa">squadratura ${num(D - A)}</span>`}</td></tr>`;
   }
@@ -6662,6 +6764,32 @@ function preparaFuoriIva(reg) {
   delete reg.pagatoIl;
 }
 
+/* ---------- fatture estere: file XML dell'integrazione o autofattura (TD17, TD18, TD19) ---------- */
+function afRegTd(reg) {
+  const v = (reg.iva || []).find(x => x.rc && x.reg === "A" && ["TD17", "TD18", "TD19"].includes(x.td));
+  return v ? v.td : (reg.estero && (reg.iva || []).some(x => x.rc) ? afTipo(reg.estero.paese, reg.estero.oggetto) : "");
+}
+async function afCrea(reg, salva) {
+  const az = aziendaCorrente(), td = afRegTd(reg); if (!az || !td) return;
+  const anno = Number(String(reg.dataReg).slice(0, 4)) || S.anno;
+  if (!reg.autofattura) {
+    const usati = tutteRegs().concat(S.coda.map(p => p.reg)).map(r => r.autofattura?.numero).filter(Boolean);
+    const numero = afNumero(td, anno, usati);
+    reg.autofattura = { numero, data: reg.dataReg, progressivo: afProgressivo(numero), creato: new Date().toISOString() };
+  }
+  const an = S.anag.find(a => a.id === reg.anagId) || {}, E = reg.estero || {};
+  const righe = (reg.iva || []).filter(v => v.reg === "A" && v.rc).map(v => ({ descr: E.descr || `${reg.descr || "Acquisto"}`.replace(/ · .*$/, ""), imp: Math.abs(v.imp), aliquota: aliquotaDi(v.cod), natura: /^N/.test(v.cod) ? v.cod : "" }));
+  const den = String(az.denominazione || "").trim();
+  const out = afXml({ td, numero: reg.autofattura.numero, data: reg.autofattura.data, progressivo: reg.autofattura.progressivo,
+    cessionario: { denominazione: den, piva: az.piva, cf: az.cf, indirizzo: az.sedeIndirizzo, cap: az.sedeCap, comune: az.sedeComune, prov: az.sedeProv },
+    fornitore: { nome: E.nome || reg.anagNome || an.denominazione, paese: E.paese || an.paese || "", vat: E.vat || an.piva || "", indirizzo: E.indirizzo, comune: E.citta },
+    rif: { numero: reg.numDoc, data: reg.dataDoc }, righe });
+  const esito = await afScarica(out.nome, out.xml, S.downloads);
+  if (salva && esito === "salvato") { try { await store.put("registrazioni", { ...reg }); } catch {} }
+  log(out.nome, esito === "salvato" ? `Integrazione ${td} n. ${reg.autofattura.numero}: imponibile ${num(out.imponibile)} €, IVA ${num(out.imposta)} € · da inviare allo SdI entro il 15 del mese successivo` : `File XML ${esito}`, esito === "salvato" ? "ok" : "work");
+  return out;
+}
+
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
 const AZ_CAMPI = [["a-den", "denominazione"], ["a-forma", "forma"], ["a-piva", "piva"], ["a-cf", "cf", "up"], ["a-pec", "pec"], ["a-stato", "stato"], ["a-liq-data", "liqData"],
@@ -6741,6 +6869,7 @@ $("#coda-body").addEventListener("click", async e => {
   if (b.dataset.act === "scarta") { S.coda = S.coda.filter(q => q !== p); return renderCoda(); }
   if (b.dataset.act === "mod") { p.open = !p.open; return renderCoda(); }
   if (b.dataset.act === "vedi") return apriVista(p);
+  if (b.dataset.act === "af") return afCrea(p.reg, false);
   if (b.dataset.act === "reg") { b.disabled = true; await registraLista([p]); }
 });
 $("#btn-conferma-tutte").addEventListener("click", async () => { $("#btn-conferma-tutte").disabled = true; await registraLista(S.coda.filter(p => !p.nonRilevante && !erroriReg(p.reg).length)); });
@@ -6767,6 +6896,7 @@ $("#pn-body").addEventListener("click", async e => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const r = S.regs.find(x => x.id === b.closest("tr").dataset.id); if (!r) return;
   if (b.dataset.act === "mod") return apriEditorPN(r);
+  if (b.dataset.act === "af") return afCrea(r, true);
   if (!b.dataset.confirm) { b.dataset.confirm = "1"; b.textContent = "Conferma"; setTimeout(() => { if (b.isConnected) { delete b.dataset.confirm; b.textContent = "Elimina"; } }, 4000); return; }
   const legate = tutteRegs().filter(x => (x.abbinamenti || []).some(a => a.regId === r.id));
   if (legate.length) { $("#pn-msg").textContent = `Prima elimina ${legate.length === 1 ? "l'incasso o il pagamento abbinato" : `i ${legate.length} incassi o pagamenti abbinati`} a questo documento.`; return; }

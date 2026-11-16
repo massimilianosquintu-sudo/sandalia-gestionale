@@ -794,6 +794,19 @@ function nuovaVoce(o) {
     else { const g = indovinaAtt(`${o.descrizione || ""} ${o.note || ""}`, atts); v.att = g || "P"; v.attDa = g ? "suggerita" : "predefinita"; }
     if (!costo && (v.attDa === "suggerita" || v.attDa === "predefinita")) v.anomalie.push("Attività da confermare");
   }
+  // fattura di un fornitore estero: integrazione o autofattura TD17, TD18 o TD19 con IVA da versare
+  const paeseEst = String(o.estero?.paese || o.paese || "").toUpperCase().slice(0, 2);
+  if (costo && paeseEst && !["IT", "SM", "VA"].includes(paeseEst)) {
+    const ogg = o.estero?.oggetto || (o.oggetto === "beni" ? "beni" : "servizi"), td = afTipo(paeseEst, ogg);
+    v.estero = o.estero ? { ...o.estero } : { paese: paeseEst, vat: String(o.vat || o.controparteCf || "").trim(), nome: v.controparte, indirizzo: String(o.indirizzo || ""), citta: String(o.citta || ""), oggetto: ogg, valuta: String(o.valuta || "EUR").toUpperCase(), td, descr: String(o.descrizione || o.note || "").slice(0, 300) };
+    if (o.autofattura) v.autofattura = { ...o.autofattura };
+    if (!o.estero) {
+      const ivaRc = r2(v.imponibile * 0.22);
+      v.anomalie.push(`Fornitore ${AF_UE.includes(paeseEst) ? "UE" : "extra UE"} (${paeseEst}): serve l'integrazione ${td} con IVA al 22% di ${eur(ivaRc)}, da inviare allo SdI entro il 15 del mese successivo al ricevimento (pulsante «XML ${td}») e da versare con F24${scadRcForf(data) ? ` entro il ${itDate(scadRcForf(data))}` : ""} (16 del secondo mese successivo al trimestre, art. 1, c. 58, lett. e-bis, L. 190/2014). Per il forfettario l'IVA versata è un costo e non si detrae.`);
+      if (v.estero.valuta !== "EUR") v.anomalie.push(`Fattura in ${v.estero.valuta}: converti l'importo in euro al cambio BCE del giorno della fattura`);
+      if (td === "TD19" && !o.beniGiaInItalia) v.anomalie.push("Beni da fornitore extra UE: l'integrazione TD19 serve solo se i beni erano già in Italia; se sono stati importati con bolla doganale l'IVA è assolta in dogana");
+    }
+  }
   if (!data) v.anomalie.push("Data mancante");
   if (!v.imponibile && tipo !== "non_rilevante") v.anomalie.push("Importo pari a zero");
   if (v.confidenza === "bassa") v.anomalie.push("Lettura incerta: controlla il documento");
@@ -828,6 +841,8 @@ async function registra(v) {
     fonte: v.fonte, file: v.file, note: v.note, chiave: chiaveDi(v), creato: new Date().toISOString(),
     att: attDi(v, attivitaCliente(c))
   };
+  if (v.estero) rec.estero = { ...v.estero };
+  if (v.autofattura) rec.autofattura = { ...v.autofattura };
   if (ripartValida(v, attivitaCliente(c))) rec.ripart = v.ripart.map(x => ({ att: x.att, imp: r2(x.imp) }));
   if (await store.esiste(c.id, rec.chiave)) return "duplicato";
   await store.putReg(rec);
@@ -1561,6 +1576,32 @@ function feChiudi() { const dlg = $("#fe-vista"); feChiudiUrl(); FEV = null; if 
   });
 })();
 
+/* ---------- fatture estere: file XML dell'integrazione (TD17, TD18, TD19) ---------- */
+/* forfettari: l'IVA del reverse charge si versa entro il 16 del secondo mese successivo al trimestre (D.Lgs. 81/2025) */
+function scadRcForf(data) { const m = /^(\d{4})-(\d{2})/.exec(data || ""); if (!m) return ""; const q = Math.ceil(Number(m[2]) / 3), mm = q * 3 + 2, y = Number(m[1]) + (mm > 12 ? 1 : 0); return `${y}-${String(mm > 12 ? mm - 12 : mm).padStart(2, "0")}-16`; }
+async function afCreaForf(v, salva) {
+  const c = clienteCorrente(), E = v.estero; if (!c || !E?.td) return;
+  const anno = Number(String(v.data).slice(0, 4)) || S.anno;
+  if (!v.autofattura) {
+    const usati = S.regs.concat(S.coda).map(r => r.autofattura?.numero).filter(Boolean);
+    const numero = afNumero(E.td, anno, usati);
+    v.autofattura = { numero, data: v.data, progressivo: afProgressivo(numero), creato: new Date().toISOString() };
+  }
+  const pf = !!(c.cognome || c.nome) && !/^\d{11}$/.test(String(c.cf || ""));
+  const out = afXml({ td: E.td, numero: v.autofattura.numero, data: v.autofattura.data, progressivo: v.autofattura.progressivo,
+    cessionario: { denominazione: pf ? "" : (c.ditta || c.denominazione), nome: c.nome, cognome: c.cognome, piva: c.piva, cf: c.cf,
+      indirizzo: c.sedeIndirizzo || c.resIndirizzo, cap: c.sedeCap || c.resCap, comune: c.sedeComune || c.resComune, prov: c.sedeProv || c.resProv },
+    fornitore: { nome: E.nome || v.controparte, paese: E.paese, vat: E.vat, indirizzo: E.indirizzo, comune: E.citta },
+    rif: { numero: v.numero, data: v.data }, righe: [{ descr: E.descr || v.note || `Acquisto da ${v.controparte}`, imp: v.imponibile, aliquota: 22 }] });
+  let esito = "salvato";
+  if (S.downloads) { try { await S.downloads.save({ filename: out.nome, data: out.xml }); } catch { esito = "annullato"; } }
+  else esito = await afScarica(out.nome, out.xml, null);
+  if (salva && esito === "salvato") { try { await store.putReg({ ...v }); } catch {} }
+  log(out.nome, esito === "salvato" ? `Integrazione ${E.td} n. ${v.autofattura.numero}: imponibile ${eur(out.imponibile)}, IVA ${eur(out.imposta)} da versare con F24 entro il ${itDate(scadRcForf(v.data))}` : `File XML ${esito}`, esito === "salvato" ? "ok" : "work");
+  if (!salva) renderCoda();
+  return out;
+}
+
 /* ---------- agente AI ---------- */
 function promptBase(fonte) {
   const c = clienteCorrente();
@@ -1581,7 +1622,7 @@ ${atts.length > 1 ? `Il contribuente esercita più attività, con ricavi da tene
 - "non_rilevante": documento che non è né un ricavo né un costo del contribuente.
 
 Rispondi solo con un array JSON. Ogni elemento ha questa forma:
-{"tipo":"fattura","data":"AAAA-MM-GG","numero":"","controparte":"","controparteCf":"","imponibile":0.00,"iva":0.00,"bollo":0.00,"incassato":false,"dataIncasso":"","conto":"",${atts.length > 1 ? '"attivita":"P",' : ""}"confidenza":"alta","note":""}
+{"tipo":"fattura","data":"AAAA-MM-GG","numero":"","controparte":"","controparteCf":"","paese":"IT","vat":"","indirizzo":"","citta":"","oggetto":"servizi","valuta":"EUR","beniGiaInItalia":false,"imponibile":0.00,"iva":0.00,"bollo":0.00,"incassato":false,"dataIncasso":"","conto":"",${atts.length > 1 ? '"attivita":"P",' : ""}"confidenza":"alta","note":""}
 
 Regole:
 - Importi in euro come numeri con il punto decimale.
@@ -1590,6 +1631,8 @@ Regole:
 - "bollo" è l'imposta di bollo addebitata nel documento (di solito 2.00), altrimenti 0.
 - "controparte" è il cliente per i documenti emessi e il fornitore per quelli ricevuti; "controparteCf" è il suo codice fiscale o la sua partita IVA, se leggibile. Per i corrispettivi "controparte" è una breve descrizione.
 - Per i corrispettivi "incassato" è true e "dataIncasso" coincide con "data".
+- "paese" è il codice ISO a due lettere dello Stato della controparte (IT se italiana). Per una fattura ricevuta da un fornitore estero: "vat" è il suo identificativo IVA completo come scritto (per esempio DK31415926, IE6388047V; vuoto se non c'è), "indirizzo" e "citta" sono quelli del fornitore, "oggetto" è "beni" o "servizi" secondo ciò che vende in prevalenza, "valuta" è la valuta del documento, "beniGiaInItalia" è true solo se un fornitore extra UE vende beni che si trovano già in Italia; "imponibile" è il totale senza IVA italiana e "iva" è 0.
+- Per tutti gli altri documenti lascia "paese":"IT", "vat":"", "indirizzo":"", "citta":"", "oggetto":"servizi", "valuta":"EUR".
 - Per le fatture "incassato" è true solo se il documento o le istruzioni indicano l'incasso o il pagamento, con la relativa data.
 - Solo per fatture e note di credito ricevute, "conto" è il conto di utilizzo, uno tra: ${conti}. Per gli altri tipi lascia "".
 ${atts.length > 1 ? `- "attivita" è l'identificativo dell'attività a cui si riferisce il ricavo o il costo, scelto dall'elenco del contribuente in base alla descrizione delle prestazioni o dei beni; se non è possibile capirlo usa "P" e spiega il dubbio in "note".
@@ -1699,7 +1742,7 @@ function renderCoda() {
           <input class="d" type="date" data-f="dataIncasso" value="${esc(v.dataIncasso)}" aria-label="Data di incasso o pagamento"${v.incassato ? "" : " hidden"}></td>
       <td><span class="pill src">${FONTI[v.fonte] || v.fonte}</span> <span class="pill ${v.tipo === "non_rilevante" ? "nr" : v.confidenza}">${v.tipo === "non_rilevante" ? "escludere" : v.confidenza}</span>
           ${v.anomalie.map(a => `<div class="anom">${esc(a)}</div>`).join("")}</td>
-      <td><div class="row" style="flex-wrap:nowrap">${v.vista ? `<button class="btn small" data-act="vedi" aria-label="Vedi il documento ${esc(v.numero || "")}">Vedi</button>` : ""}<button class="btn small pri" data-act="reg"${v.tipo === "non_rilevante" ? " disabled" : ""}>Registra</button><button class="btn small" data-act="scarta">Scarta</button></div></td>
+      <td><div class="row" style="flex-wrap:nowrap">${v.vista ? `<button class="btn small" data-act="vedi" aria-label="Vedi il documento ${esc(v.numero || "")}">Vedi</button>` : ""}${v.estero?.td ? `<button class="btn small" data-act="af" title="File XML dell'integrazione da inviare allo SdI">XML ${v.estero.td}</button>` : ""}<button class="btn small pri" data-act="reg"${v.tipo === "non_rilevante" ? " disabled" : ""}>Registra</button><button class="btn small" data-act="scarta">Scarta</button></div></td>
     </tr>`;
   }).join("");
 }
@@ -1757,7 +1800,7 @@ function renderRegistro() {
       <td>${r.tipo === "corrispettivo" ? `<span class="hint">${itDate(r.dataIncasso)}</span>` :
         `<label class="check"><input type="checkbox" data-f="incassato"${r.incassato ? " checked" : ""}><span class="hint">${costi ? "Pagata" : "Incassata"}</span></label>${r.incassato ? `<input class="d" type="date" data-f="dataIncasso" value="${esc(r.dataIncasso)}" aria-label="Data di incasso o pagamento">` : ""}`}</td>
       <td><span class="pill src">${FONTI[r.fonte] || esc(r.fonte)}</span></td>
-      <td><button class="btn small danger" data-act="del">Elimina</button></td></tr>${S.ripOpen === r.id && multi ? ripHtml(r, atts, cols) : ""}`;
+      <td><div class="row" style="flex-wrap:nowrap">${r.estero?.td ? `<button class="btn small" data-act="af" title="File XML dell'integrazione da inviare allo SdI">XML ${r.estero.td}</button>` : ""}<button class="btn small danger" data-act="del">Elimina</button></div></td></tr>${S.ripOpen === r.id && multi ? ripHtml(r, atts, cols) : ""}`;
   }).join("");
   $("#reg-foot").innerHTML = `<tr><td></td><td colspan="4">Totale (${list.length} registrazion${list.length === 1 ? "e" : "i"})${fa ? " · quota dell'attività filtrata" : ""}</td><td class="num">${eur(tot)}</td><td class="num">${eur(tb2)}</td><td colspan="${(costi ? 4 : 3) + (multi ? 1 : 0)}"></td></tr>`;
 }
@@ -2280,6 +2323,7 @@ $("#coda-body").addEventListener("click", async e => {
   const tr = b.closest("tr[data-id]"); const v = S.coda.find(x => x.id === tr.dataset.id); if (!v) return;
   if (b.dataset.act === "scarta") { S.coda = S.coda.filter(x => x !== v); S.selCoda.delete(v.id); return renderCoda(); }
   if (b.dataset.act === "vedi") return apriVista(v);
+  if (b.dataset.act === "af") return afCreaForf(v, false);
   b.disabled = true;
   try {
     const esito = await registra(v);
@@ -2359,6 +2403,8 @@ $("#reg-body").addEventListener("input", e => {
   tr.querySelector("[data-rip-msg]").textContent = ripMsg(r, m);
 });
 $("#reg-body").addEventListener("click", async e => {
+  const bf = e.target.closest("button[data-act='af']");
+  if (bf) { const r = S.regs.find(x => x.id === bf.closest("tr[data-id]")?.dataset.id); if (r) afCreaForf(r, true); return; }
   const ba = e.target.closest("button[data-act^='rip']");
   if (ba) {
     const act = ba.dataset.act, trr = ba.closest("tr[data-rip]"), id = trr ? trr.dataset.rip : ba.closest("tr[data-id]")?.dataset.id;
@@ -2637,6 +2683,107 @@ async function init() {
 init();
 </script>
 
+<script>/*AUTOFATTURA*/
+/* ======================= FATTURE ESTERE: INTEGRAZIONE / AUTOFATTURA XML (TD17, TD18, TD19) =======================
+   Dalla fattura di un fornitore estero (letta dal PDF) si prepara il file FatturaPA 1.2 dell'integrazione da inviare allo SdI:
+   - TD17 integrazione/autofattura per acquisto di servizi dall'estero (art. 17, c. 2, DPR 633/72; art. 7-ter);
+   - TD18 integrazione per acquisto di beni intracomunitari (artt. 46 e 47 DL 331/93);
+   - TD19 integrazione/autofattura per acquisto di beni ex art. 17, c. 2, già presenti in Italia.
+   Il cedente/prestatore è il fornitore estero, il cessionario/committente è il cliente dello Studio; SoggettoEmittente CC.
+   Aliquota del 22% salvo diversa indicazione; ImportoTotaleDocumento = imponibile (l'imposta è nel riepilogo). */
+const AF_UE = ["AT", "BE", "BG", "CY", "HR", "DK", "EE", "FI", "FR", "DE", "GR", "EL", "IE", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "CZ", "RO", "SK", "SI", "ES", "SE", "HU"];
+const AF_TD = { TD17: "Integrazione/autofattura per acquisto servizi dall'estero", TD18: "Integrazione per acquisto di beni intracomunitari", TD19: "Integrazione/autofattura per acquisto di beni ex art. 17 c. 2 DPR 633/72" };
+const AF_NORMA = { TD17: "Inversione contabile art. 17, c. 2, DPR 633/72 (servizi art. 7-ter)", TD18: "Integrazione artt. 46 e 47 DL 331/93 (acquisto intracomunitario di beni)", TD19: "Autofattura art. 17, c. 2, DPR 633/72 (beni già in Italia)" };
+/* tipo di integrazione dal Paese del fornitore e dall'oggetto: null se non serve (fornitore italiano o beni importati con bolla doganale) */
+function afTipo(paese, oggetto, beniInItalia) {
+  const p = String(paese || "").toUpperCase(); if (!p || p === "IT" || p === "SM" || p === "VA") return null;
+  if (oggetto !== "beni") return "TD17";
+  if (AF_UE.includes(p)) return "TD18";
+  return "TD19";   // beni extra UE: solo se già presenti in Italia; quelli importati passano dalla dogana
+}
+const afX = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c])).replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€]/g, "").trim();
+const afN = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+const afTag = (t, v, max) => v === "" || v == null ? "" : `<${t}>${afX(max ? String(v).slice(0, max) : v)}</${t}>`;
+/* identificativo IVA estero: senza prefisso del Paese; se manca (fornitore extra UE) un codice convenzionale */
+function afVat(paese, vat) {
+  const p = String(paese || "").toUpperCase();
+  let v = String(vat || "").toUpperCase().replace(/\b(MWST|TVA|IVA|VAT|UID|EIN|TIN|TAX|ABN|GST|NO|NR)\b\.?/g, " ").replace(/[^A-Z0-9]/g, "");
+  if (p === "CH" && v.startsWith("CHE")) v = v.slice(3); else if (v.startsWith(p)) v = v.slice(p.length);
+  if (p === "GR" && v.startsWith("EL")) v = v.slice(2);
+  return v.slice(0, 28) || "99999999999";
+}
+/* numero dell'integrazione: TD17-2026/001, progressivo per tipo e anno */
+function afNumero(td, anno, usati) {
+  const re = new RegExp(`^${td}-${anno}/(\\d+)$`), n = (usati || []).map(x => Number((String(x).match(re) || [])[1]) || 0);
+  return `${td}-${anno}/${String((n.length ? Math.max(...n) : 0) + 1).padStart(3, "0")}`;
+}
+/* o = { td, numero, data, progressivo, cessionario:{denominazione|nome+cognome, piva, cf, indirizzo, cap, comune, prov},
+         fornitore:{nome, paese, vat, indirizzo, comune}, rif:{numero, data}, righe:[{descr, imp, aliquota, natura}], causale } */
+function afXml(o) {
+  const C = o.cessionario || {}, F = o.fornitore || {}, paese = String(F.paese || "").toUpperCase().slice(0, 2) || "OO";
+  const piva = String(C.piva || "").replace(/\D/g, ""), prog = String(o.progressivo || "00001").replace(/[^A-Za-z0-9]/g, "").slice(-5).padStart(5, "0");
+  const righe = (o.righe || []).filter(r => Number(r.imp)).map(r => ({ descr: r.descr || "Acquisto", imp: Math.round(r.imp * 100) / 100, al: Number(r.aliquota ?? 22), nat: r.natura || "" }));
+  const riep = new Map();
+  for (const r of righe) { const k = r.al + "|" + (r.al ? "" : r.nat); const e = riep.get(k) || { al: r.al, nat: r.al ? "" : r.nat, imp: 0 }; e.imp += r.imp; riep.set(k, e); }
+  const tot = righe.reduce((s, r) => s + r.imp, 0);
+  const nome = C.denominazione ? `<Denominazione>${afX(C.denominazione).slice(0, 80)}</Denominazione>` : `<Nome>${afX(C.nome).slice(0, 60)}</Nome><Cognome>${afX(C.cognome).slice(0, 60)}</Cognome>`;
+  const cf = String(C.cf || "").toUpperCase().replace(/\s/g, "");
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2 http://www.fatturapa.gov.it/export/fatturazione/sdi/fatturapa/v1.2/Schema_del_file_xml_FatturaPA_versione_1.2.xsd">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>${afX(piva || cf)}</IdCodice></IdTrasmittente>
+      <ProgressivoInvio>${prog}</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>0000000</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>${afX(paese === "GR" ? "EL" : paese)}</IdPaese><IdCodice>${afX(afVat(paese, F.vat))}</IdCodice></IdFiscaleIVA>
+        <Anagrafica><Denominazione>${afX(F.nome || "Fornitore estero").slice(0, 80)}</Denominazione></Anagrafica>
+        <RegimeFiscale>RF18</RegimeFiscale>
+      </DatiAnagrafici>
+      <Sede><Indirizzo>${afX(F.indirizzo || "Indirizzo estero").slice(0, 60)}</Indirizzo><CAP>00000</CAP><Comune>${afX(F.comune || "Estero").slice(0, 60)}</Comune><Nazione>${afX(paese === "EL" ? "GR" : paese)}</Nazione></Sede>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        ${piva ? `<IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>${piva}</IdCodice></IdFiscaleIVA>` : ""}${cf ? `<CodiceFiscale>${afX(cf)}</CodiceFiscale>` : ""}
+        <Anagrafica>${nome}</Anagrafica>
+      </DatiAnagrafici>
+      <Sede><Indirizzo>${afX(C.indirizzo || "").slice(0, 60)}</Indirizzo><CAP>${afX(String(C.cap || "").replace(/\D/g, "").padStart(5, "0").slice(0, 5))}</CAP><Comune>${afX(C.comune || "").slice(0, 60)}</Comune>${C.prov ? `<Provincia>${afX(String(C.prov).toUpperCase().slice(0, 2))}</Provincia>` : ""}<Nazione>IT</Nazione></Sede>
+    </CessionarioCommittente>
+    <SoggettoEmittente>CC</SoggettoEmittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>${o.td}</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>${afX(o.data)}</Data>
+        <Numero>${afX(o.numero).slice(0, 20)}</Numero>
+        <ImportoTotaleDocumento>${afN(tot)}</ImportoTotaleDocumento>
+        <Causale>${afX(o.causale || `${AF_TD[o.td]} - ${AF_NORMA[o.td]}`).slice(0, 200)}</Causale>
+      </DatiGeneraliDocumento>
+      ${o.rif && o.rif.numero ? `<DatiFattureCollegate><IdDocumento>${afX(o.rif.numero).slice(0, 20)}</IdDocumento>${o.rif.data ? `<Data>${afX(o.rif.data)}</Data>` : ""}</DatiFattureCollegate>` : ""}
+    </DatiGenerali>
+    <DatiBeniServizi>
+${righe.map((r, i) => `      <DettaglioLinee><NumeroLinea>${i + 1}</NumeroLinea><Descrizione>${afX(`${r.descr} - ${AF_NORMA[o.td]}`).slice(0, 1000)}</Descrizione><PrezzoUnitario>${afN(r.imp)}</PrezzoUnitario><PrezzoTotale>${afN(r.imp)}</PrezzoTotale><AliquotaIVA>${afN(r.al)}</AliquotaIVA>${r.al ? "" : `<Natura>${afX(r.nat || "N4")}</Natura>`}</DettaglioLinee>`).join("\n")}
+${[...riep.values()].map(e => `      <DatiRiepilogo><AliquotaIVA>${afN(e.al)}</AliquotaIVA>${e.al ? "" : `<Natura>${afX(e.nat || "N4")}</Natura>`}<ImponibileImporto>${afN(e.imp)}</ImponibileImporto><Imposta>${afN(e.imp * e.al / 100)}</Imposta>${e.al ? "<EsigibilitaIVA>I</EsigibilitaIVA>" : ""}</DatiRiepilogo>`).join("\n")}
+    </DatiBeniServizi>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>
+`;
+  return { xml, nome: `IT${piva || cf}_${prog}.xml`, imponibile: Math.round(tot * 100) / 100, imposta: Math.round([...riep.values()].reduce((s, e) => s + Math.round(e.imp * e.al) / 100, 0) * 100) / 100 };
+}
+/* progressivo d'invio: 5 caratteri alfanumerici dal numero dell'integrazione */
+function afProgressivo(numero) { const m = String(numero || "").match(/^TD(\d\d)-(\d{4})\/(\d+)$/); return m ? ({ 17: "Q", 18: "R", 19: "S" }[m[1]] || "T") + m[2].slice(-1) + String(Number(m[3]) % 1000).padStart(3, "0") : "T" + String(Date.now()).slice(-4); }
+async function afScarica(nome, xml, downloads) {
+  if (downloads) { try { await downloads.save({ filename: nome, data: xml }); return "salvato"; } catch { return "annullato"; } }
+  try { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([xml], { type: "application/xml" })); a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); return "salvato"; }
+  catch { return "non disponibile"; }
+}
+
+/*/AUTOFATTURA*/</script>
 <script>/*STAMPA-PDF*/
 /* ======================= STAMPA E PDF DELLA SEZIONE APERTA =======================
    Modulo comune a contabilità e portale. «Stampa» apre la finestra di stampa del browser con la sola sezione visibile
