@@ -276,16 +276,22 @@ details.notes summary{cursor:pointer;font-weight:600;font-family:var(--f-display
             <div class="f wide"><label for="ip-forma">Forma giuridica</label><select id="ip-forma" data-k="forma" data-t="s">
               <option value="cap" data-only="ord">Società di capitali (IRES)</option>
               <option value="pers">Società di persone (snc, sas)</option>
-              <option value="ind">Impresa individuale</option></select></div>
+              <option value="ind">Ditta individuale (impresa o professionista)</option></select></div>
             <div class="f wide" data-only="semp"><label for="ip-attivita">Attività prevalente<small>determina la soglia di ricavi della semplificata</small></label><select id="ip-attivita" data-k="attivita" data-t="s"><option value="serv">Prestazioni di servizi · € 500.000</option><option value="altre">Altre attività · € 800.000</option></select></div>
           </fieldset>
+          <fieldset data-forma="pers ind forf" id="fsAttivita"><legend>Attività e contributi</legend>
+            <div class="f wide"><label for="ip-tipoAtt">Tipo di attività<small>da indicare sempre: determina reddito e contributi</small></label><select id="ip-tipoAtt" data-k="tipoAtt" data-t="s"><option value="">Scegli il tipo di attività…</option><option value="impresa">Impresa · artigiano, commerciante, altre imprese</option><option value="autonomo">Lavoratore autonomo senza albo · gestione separata INPS</option><option value="prof">Professionista iscritto a un albo</option></select></div>
+            <div class="f wide" data-forma="forf"><label for="ip-prev">Cassa di riferimento per i contributi<small>da indicare sempre</small></label><select id="ip-prev" data-k="prev" data-t="s"><option value="">Scegli la cassa…</option><option value="com">INPS commercianti</option><option value="art">INPS artigiani</option><option value="gs">INPS gestione separata</option><option value="cassa">Cassa professionale</option><option value="no">Nessuna (già coperto da altra attività)</option></select></div>
+            <div class="f wide" data-uso="cassa"><label for="ip-cassaNome">Cassa professionale</label><select id="ip-cassaNome" data-k="cassaNome" data-t="s"><option value="">Scegli la cassa…</option><option value="ENPAM">ENPAM · medici e odontoiatri</option><option value="FORENSE">Cassa Forense · avvocati</option><option value="CNPADC">CNPADC · dottori commercialisti</option><option value="CNPR">CNPR · ragionieri ed esperti contabili</option><option value="INARCASSA">Inarcassa · ingegneri e architetti</option><option value="CIPAG">CIPAG · geometri</option><option value="EPPI">EPPI · periti industriali</option><option value="ENPAP">ENPAP · psicologi</option><option value="ENPAPI">ENPAPI · infermieri</option><option value="ENPAV">ENPAV · veterinari</option><option value="ENPAF">ENPAF · farmacisti</option><option value="ENPACL">ENPACL · consulenti del lavoro</option><option value="ENPAB">ENPAB · biologi</option><option value="EPAP">EPAP · agronomi, chimici, geologi, attuari</option><option value="NOTAI">Cassa del Notariato</option><option value="INPGI">INPGI / gestione separata giornalisti</option><option value="ALTRA">Altra cassa professionale</option></select></div>
+            <div class="f" data-uso="cassa"><label for="ip-aliqCassa">Contributo soggettivo<small>aliquota della cassa sul reddito</small></label><div class="in"><input id="ip-aliqCassa" data-k="aliqCassa" type="number" step="0.25" inputmode="decimal"><span>%</span></div></div>
+            <div class="f" data-uso="cassa"><label for="ip-minCassa">Contributo minimo<small>se previsto dalla cassa</small></label><div class="in"><input id="ip-minCassa" data-k="minCassa" type="number" step="50" inputmode="decimal"><span>€</span></div></div>
+            <div class="f" data-uso="gs"><label for="ip-aliqGS">Aliquota gestione separata<small>25% + 0,72% + 0,35% ISCRO</small></label><div class="in"><input id="ip-aliqGS" data-k="aliqGS" type="number" step="0.01" inputmode="decimal"><span>%</span></div></div>
+          </fieldset>
+          <hr data-forma="pers ind forf">
           <fieldset data-only="forf"><legend>Regime forfettario</legend>
             <div class="f wide"><label for="ip-coeff">Coefficiente di redditività<small>gruppo di attività dell'allegato 4, L. 190/2014</small></label><select id="ip-coeff" data-k="coeff"><option value="40">40% · alimentari, commercio, alloggio e ristorazione</option><option value="54">54% · commercio ambulante altri prodotti</option><option value="62">62% · intermediari del commercio</option><option value="67">67% · altre attività economiche</option><option value="78">78% · professioni, servizi finanziari e assicurativi</option><option value="86">86% · costruzioni e attività immobiliari</option></select></div>
             <div class="f"><label for="ip-sost">Imposta sostitutiva</label><select id="ip-sost" data-k="sost"><option value="15">15%</option><option value="5">5% (primi 5 anni)</option></select></div>
-            <div class="f wide"><label for="ip-prev">Gestione previdenziale</label><select id="ip-prev" data-k="prev" data-t="s"><option value="gs">Gestione separata INPS</option><option value="com">INPS commercianti</option><option value="art">INPS artigiani</option><option value="cassa">Cassa professionale</option><option value="no">Nessuna (già coperto)</option></select></div>
-            <div class="f" data-prev="gs"><label for="ip-aliqGS">Aliquota gestione separata<small>25% + 0,72% + 0,35% ISCRO</small></label><div class="in"><input id="ip-aliqGS" data-k="aliqGS" type="number" step="0.01" inputmode="decimal"><span>%</span></div></div>
-            <div class="f" data-prev="cassa"><label for="ip-aliqCassa">Aliquota cassa professionale<small>contributo soggettivo</small></label><div class="in"><input id="ip-aliqCassa" data-k="aliqCassa" type="number" step="0.5" inputmode="decimal"><span>%</span></div></div>
-            <div class="f"><label for="ip-contribVers">Contributi versati nell'anno<small>deducibili; vuoto = stima di competenza</small></label><div class="in"><input id="ip-contribVers" data-k="contribVers" data-t="opt" type="number" step="100" inputmode="decimal" placeholder="auto"><span>€</span></div></div>
+                        <div class="f"><label for="ip-contribVers">Contributi versati nell'anno<small>deducibili; vuoto = stima di competenza</small></label><div class="in"><input id="ip-contribVers" data-k="contribVers" data-t="opt" type="number" step="100" inputmode="decimal" placeholder="auto"><span>€</span></div></div>
           </fieldset>
           <hr>
           <fieldset><legend>Periodo e ricavi</legend>
@@ -843,9 +849,32 @@ var PDF_THEMES={"ord":{"G":[29,106,85],"GD":[18,74,59],"SOFT":[230,240,235],"EST
 var MULTI_REGIME=true;
 // ---- Regimi: imposte e contributi per ordinaria, semplificata, forfettaria ----
 var REG_NAME={ord:'Contabilità ordinaria',semp:'Contabilità semplificata',forf:'Regime forfettario'};
-var FORMA_NAME={cap:'Società di capitali',pers:'Società di persone',ind:'Impresa individuale',forf:'Persona fisica in regime forfettario'};
+var FORMA_NAME={cap:'Società di capitali',pers:'Società di persone',ind:'Ditta individuale',forf:'Persona fisica in regime forfettario'};
 var COEFF=[[40,'Industrie alimentari e bevande, commercio all’ingrosso e al dettaglio, ambulanti alimentari, alloggio e ristorazione'],[54,'Commercio ambulante di altri prodotti'],[62,'Intermediari del commercio'],[67,'Altre attività economiche'],[78,'Attività professionali, scientifiche, tecniche, sanitarie, istruzione, servizi finanziari e assicurativi'],[86,'Costruzioni e attività immobiliari']];
-var PREV_NAME={gs:'Gestione separata INPS',art:'INPS artigiani',com:'INPS commercianti',cassa:'Cassa professionale',no:'Nessuna (già coperto)'};
+var PREV_NAME={'':'Non indicata',gs:'INPS gestione separata',art:'INPS artigiani',com:'INPS commercianti',cassa:'Cassa professionale',no:'Nessuna (già coperto)'};
+var TIPO_ATT_NAME={'':'Non indicato',impresa:'Impresa',autonomo:'Lavoratore autonomo senza albo',prof:'Professionista iscritto a un albo'};
+var CASSE_NAME={'ENPAM':'ENPAM','FORENSE':'Cassa Forense','CNPADC':'CNPADC','CNPR':'CNPR','INARCASSA':'Inarcassa','CIPAG':'CIPAG','EPPI':'EPPI','ENPAP':'ENPAP','ENPAPI':'ENPAPI','ENPAV':'ENPAV','ENPAF':'ENPAF','ENPACL':'ENPACL','ENPAB':'ENPAB','EPAP':'EPAP','NOTAI':'Cassa del Notariato','INPGI':'INPGI / gestione separata giornalisti','ALTRA':'Altra cassa professionale'};
+function nomeCassa(ip,g){ return g==='cassa'?(CASSE_NAME[ip.cassaNome]||'Cassa professionale'):(PREV_NAME[g]||''); }
+// contributi previdenziali per la cassa di riferimento: INPS IVS, gestione separata (fino al massimale), cassa professionale (soggettivo con minimo)
+function contribPrev(base,g,ip){
+  base=Math.max(0,base);
+  if(g==='art'||g==='com') return inpsIVS(base,g,ip);
+  if(g==='gs'){ var b=base; if(num(ip.massimale)>0) b=Math.min(b,num(ip.massimale)); return b*num(ip.aliqGS)/100; }
+  if(g==='cassa') return Math.max(num(ip.minCassa),base*num(ip.aliqCassa)/100);
+  return 0;
+}
+function casseInUso(){ var f=formaCorrente(); if(f==='forf') return [S.ip.prev||'']; if(f==='ind'||f==='pers') return sociCorrenti(f).map(function(s){ return s.inps||''; }); return []; }
+function avvisiAttivita(TX){
+  var f=formaCorrente(), ip=S.ip; if(f==='cap') return;
+  var t=ip.tipoAtt||'', U=casseInUso(), w=[];
+  if(!t) TX.alerts.unshift(['bad','Indica il tipo di attività (impresa, lavoratore autonomo o professionista) nel pannello Ipotesi: determina il reddito e i contributi.']);
+  if(U.indexOf('')>=0) TX.alerts.unshift(['bad','Indica la cassa di riferimento per i contributi'+(f==='pers'?' di ciascun socio':'')+' nel pannello Ipotesi: finché manca, i contributi non sono calcolati.']);
+  if(U.indexOf('cassa')>=0&&!ip.cassaNome) w.push('Indica quale cassa professionale.');
+  if(t==='impresa'&&U.some(function(g){ return g==='gs'||g==='cassa'; })) w.push('Per un’impresa la cassa di riferimento è di norma INPS artigiani o commercianti.');
+  if(t==='prof'&&U.some(function(g){ return g==='art'||g==='com'; })) w.push('Il professionista iscritto a un albo versa alla propria cassa o, se non ne ha una, alla gestione separata INPS.');
+  if(t==='autonomo'&&U.some(function(g){ return g==='art'||g==='com'||g==='cassa'; })) w.push('Il lavoratore autonomo senza albo è iscritto di norma alla gestione separata INPS.');
+  w.forEach(function(x){ TX.alerts.push(['warn',x]); });
+}
 var IRPEF_SC=[[28000,23],[50000,33],[Infinity,43]];
 var SOGLIA_FORF=85000, USCITA_FORF=100000;
 
@@ -879,13 +908,14 @@ function formaCorrente(){
   return S.ip.forma==='pers'?'pers':'ind';
 }
 function sociCorrenti(f){
-  var s=Array.isArray(S.ip.soci)&&S.ip.soci.length?S.ip.soci:[{nome:'Titolare',quota:100,inps:'com',altri:0}];
+  var s=Array.isArray(S.ip.soci)&&S.ip.soci.length?S.ip.soci:[{nome:'Titolare',quota:100,inps:'',altri:0}];
   if(f==='ind') return [Object.assign({},s[0],{quota:100})];
   return s;
 }
 function calcRegime(R){
   var t=R.t, a=t.a26, fx=a.fx, ip=S.ip, f=formaCorrente();
   var TX={forma:f, alerts:[], lines:[], soci:null};
+  avvisiAttivita(TX);
   var ric=a.A1, ante=a.ANTE, resid=residuoLbl(R.M,(typeof D!=='undefined'&&D)?D.al:'');
   var rate=function(k){ return nf2.format(num(ip[k]))+'%'; };
   if(f==='cap'){
@@ -925,7 +955,7 @@ function calcRegime(R){
     var rows=soci.map(function(s){
       var q=num(s.quota)/100; qtot+=num(s.quota);
       var rq=reddito*q, altri=Math.max(0,num(s.altri));
-      var inps=inpsIVS(Math.max(0,rq),s.inps,ip);
+      var inps=contribPrev(rq,s.inps||'',ip);
       var rcTot=Math.max(0,rq+altri-inps), rcAltri=altri;
       var lorda=Math.max(0,irpefLorda(rcTot)-irpefLorda(rcAltri));
       var detr=(ip.detr13&&altri===0)?Math.min(detrImpresaMinore(rcTot),lorda):0;
@@ -944,13 +974,13 @@ function calcRegime(R){
     TX.burden=irap+pers; TX.netto=ante-TX.burden;
     TX.burdenLabel='Imposte e contributi'; TX.nettoLabel=f==='pers'?'Netto disponibile soci':'Netto disponibile titolare';
     TX.reddito=reddito; TX.irap=irap;
-    var chi=f==='pers'?'dei soci':'del titolare';
+    var chi=f==='pers'?'dei soci':'del titolare', aut=ip.tipoAtt==='autonomo'||ip.tipoAtt==='prof', nomeRed=aut?'Reddito di lavoro autonomo':'Reddito d’impresa';
     TX.lines=[
-      ['hd','Reddito d’impresa'],
+      ['hd',nomeRed],
       ['','Risultato prima delle imposte',ante],
       ['','Variazioni in aumento (quote indeducibili per sottoconto)',fx.varUp],
       ['','Altre variazioni in aumento / diminuzione',fx.altre],
-      ['tot',f==='pers'?'Reddito d’impresa imputato ai soci (art. 5 TUIR)':'Reddito d’impresa',reddito]
+      ['tot',f==='pers'?nomeRed+' imputato ai soci (art. 5 TUIR)':nomeRed+(aut?' (art. 54 TUIR)':''),reddito]
     ];
     if(f==='pers') TX.lines=TX.lines.concat([
       ['hd','IRAP'],
@@ -962,7 +992,7 @@ function calcRegime(R){
     ]);
     TX.lines=TX.lines.concat([
       ['hd','IRPEF e contributi '+chi],
-      ['','Contributi INPS IVS (deducibili)',S_('inps')],
+      ['','Contributi previdenziali deducibili · '+(f==='pers'?'cassa di ciascun socio':nomeCassa(ip,(soci[0]||{}).inps||'')),S_('inps')],
       ['','Reddito complessivo ai fini IRPEF',S_('rc')],
       ['','IRPEF lorda (23% · 33% · 43%)',S_('lorda')]
     ]);
@@ -978,8 +1008,8 @@ function calcRegime(R){
     TX.sum={inps:S_('inps'),irpef:S_('netta'),add:S_('addR')+S_('addC')};
     TX.kpi=[
       ['Ricavi previsti',ric,R.R?'di cui € '+eur(t.sd.A1)+' stimati '+resid:'esercizio completo'],
-      ['Reddito d’impresa',reddito,'risultato ante imposte € '+eur(ante)],
-      ['Imposte e contributi',TX.burden,(f==='pers'?'IRAP € '+eur(irap)+' · ':'')+'IRPEF € '+eur(S_('netta')+S_('addR')+S_('addC'))+' · INPS € '+eur(S_('inps'))],
+      [nomeRed,reddito,'risultato ante imposte € '+eur(ante)],
+      ['Imposte e contributi',TX.burden,(f==='pers'?'IRAP € '+eur(irap)+' · ':'')+'IRPEF € '+eur(S_('netta')+S_('addR')+S_('addC'))+' · contributi € '+eur(S_('inps'))],
       [TX.nettoLabel,TX.netto,'dopo imposte e contributi']
     ];
     if(f==='pers'&&Math.abs(qtot-100)>0.01) TX.alerts.push(['bad','Le quote dei soci sommano al '+nf2.format(qtot)+'%: correggerle nel pannello Ipotesi.']);
@@ -990,10 +1020,8 @@ function calcRegime(R){
     }
   }
   else { // forfettario
-    var coeff=num(ip.coeff)/100, lordo=ric*coeff, prev=ip.prev||'gs', contr=0;
-    if(prev==='gs'){ var bg=lordo; if(num(ip.massimale)>0) bg=Math.min(bg,num(ip.massimale)); contr=bg*num(ip.aliqGS)/100; }
-    else if(prev==='art'||prev==='com') contr=inpsIVS(lordo,prev,ip);
-    else if(prev==='cassa') contr=lordo*num(ip.aliqCassa)/100;
+    var coeff=num(ip.coeff)/100, lordo=ric*coeff, prev=ip.prev||'', contr=0;
+    contr=contribPrev(lordo,prev,ip);
     var ded=(ip.contribVers===''||ip.contribVers==null)?contr:num(ip.contribVers);
     var impon=Math.max(0,lordo-ded), sost=impon*num(ip.sost)/100;
     TX.ceImp=a.E20; TX.ceImpLabel='20) Imposte'; TX.ceUtileLabel='21) Risultato economico (ricavi − costi)'; TX.margLast='Risultato economico';
@@ -1040,6 +1068,7 @@ function ipotesiList(){
   var p=function(k){ return nf2.format(num(ip[k]))+'%'; }, e=function(k){ return '€ '+eur2(num(ip[k])); };
   L.push(['Regime contabile',REG_NAME[REGIME]]);
   if(REGIME!=='forf') L.push(['Forma giuridica',FORMA_NAME[f]]);
+  if(f!=='cap'){ L.push(['Tipo di attività',TIPO_ATT_NAME[ip.tipoAtt||'']]); L.push(['Cassa di riferimento per i contributi',f==='forf'?nomeCassa(ip,ip.prev||''):sociCorrenti(f).map(function(s){ return (f==='pers'?s.nome+': ':'')+nomeCassa(ip,s.inps||''); }).join(' · ')]); if(casseInUso().indexOf('cassa')>=0){ L.push(['Contributo soggettivo cassa professionale',p('aliqCassa')]); if(num(ip.minCassa)>0) L.push(['Contributo minimo cassa professionale',e('minCassa')]); } if(f!=='forf'&&casseInUso().indexOf('gs')>=0) L.push(['Aliquota gestione separata',p('aliqGS')]); }
   if(REGIME==='semp') L.push(['Attività prevalente (soglia semplificata)',ip.attivita==='altre'?'Altre attività · € 800.000':'Servizi · € 500.000']);
   L.push(['Scostamento ricavi nei mesi residui rispetto al trend',p('scost')]);
   L.push(['Mensilità aggiuntive rilevate a fine esercizio',String(num(ip.mensAgg))]);
@@ -1058,9 +1087,7 @@ function ipotesiList(){
   if(f==='forf'){
     L.push(['Coefficiente di redditività',nf0.format(num(ip.coeff))+'%']);
     L.push(['Imposta sostitutiva',p('sost')]);
-    L.push(['Gestione previdenziale',PREV_NAME[ip.prev]||'']);
     if(ip.prev==='gs') L.push(['Aliquota gestione separata',p('aliqGS')]);
-    if(ip.prev==='cassa') L.push(['Aliquota cassa professionale',p('aliqCassa')]);
     if(ip.prev==='art'||ip.prev==='com') L.push(['Riduzione contributi INPS',p('rid')]);
     L.push(['Contributi deducibili',ip.contribVers===''||ip.contribVers==null?'pari alla stima di competenza':e('contribVers')+' (versati nell’anno)']);
   }
@@ -1073,7 +1100,7 @@ function noteList(){
   ];
   if(f==='cap') N.push('Le rettifiche di fine esercizio comprendono mensilità aggiuntive con relativi oneri sociali, accantonamento TFR e ammortamenti, se non già presenti nel provvisorio.','IRES calcolata sul risultato ante imposte aumentato delle quote indeducibili per conto; IRAP sul valore della produzione netta, al netto della deduzione per il costo del lavoro dipendente. Interessi passivi considerati deducibili nei limiti dell’art. 96 TUIR.');
   if(f==='pers'||f==='ind'){
-    N.push(REGIME==='semp'?'Contabilità semplificata: reddito d’impresa determinato ai sensi dell’art. 66 TUIR con il criterio di cassa per ricavi e costi; la proiezione assume che gli incassi e i pagamenti dei mesi residui seguano l’andamento del periodo chiuso.':'Contabilità ordinaria: reddito d’impresa determinato ai sensi degli artt. 56 e seguenti TUIR secondo il principio di competenza.');
+    N.push(REGIME==='semp'&&(S.ip.tipoAtt==='prof'||S.ip.tipoAtt==='autonomo')?'Contabilità semplificata del lavoratore autonomo: reddito determinato ai sensi dell’art. 54 TUIR con il criterio di cassa (compensi incassati e spese pagate).':REGIME==='semp'?'Contabilità semplificata: reddito d’impresa determinato ai sensi dell’art. 66 TUIR con il criterio di cassa per ricavi e costi; la proiezione assume che gli incassi e i pagamenti dei mesi residui seguano l’andamento del periodo chiuso.':'Contabilità ordinaria: reddito d’impresa determinato ai sensi degli artt. 56 e seguenti TUIR secondo il principio di competenza.');
     N.push(f==='pers'?'Il reddito della società di persone è imputato ai soci in proporzione alle quote (art. 5 TUIR) e tassato ai fini IRPEF in capo a ciascuno; la società è soggetto passivo IRAP.':'L’impresa individuale non è soggetta a IRAP dal 2022 (art. 1, c. 8, L. 234/2021); il reddito d’impresa è tassato ai fini IRPEF in capo al titolare.');
     N.push('IRPEF 2026: 23% fino a € 28.000, 33% da € 28.000 a € 50.000, 43% oltre (L. 199/2025). Contributi INPS artigiani e commercianti 2026 secondo la circolare INPS n. 14/2026, dedotti dal reddito complessivo come oneri deducibili; nel calcolo sono considerati per competenza, mentre in dichiarazione si deducono quelli versati nell’anno.');
     N.push('L’IRPEF attribuita all’impresa, in presenza di altri redditi del socio, è calcolata come differenza tra l’imposta sul reddito complessivo e quella sui soli altri redditi; in tal caso la detrazione dell’art. 13, c. 5 TUIR non è considerata.');
@@ -1090,9 +1117,9 @@ function noteList(){
 
 function ipDefault(){ return {scost:0,mensAgg:1,tfrPct:REGIME==='forf'?0:6.91,amm26:0,ires:24,irap:2.93,dedLav:100,altre26:0,studio:'Sandalia Srls · Porto Torres',
   forma:REGIME==='ord'?'cap':'ind', attivita:'serv', addReg:1.23, addCom:0.8, detr13:REGIME==='semp',
-  soci:[{nome:'Titolare',quota:100,inps:'com',altri:0}],
+  soci:[{nome:'Titolare',quota:100,inps:'',altri:0}], tipoAtt:'', cassaNome:'', minCassa:0,
   minimale:18808, aliqArt:24, aliqCom:24.48, fascia:56224, massimale:122295, rid:0,
-  coeff:67, sost:15, prev:'gs', aliqGS:26.07, aliqCassa:15, contribVers:''}; }
+  coeff:67, sost:15, prev:'', aliqGS:26.07, aliqCassa:15, contribVers:''}; }
 IP_DEFAULT=ipDefault();
 var REG_TESTI={"ord":{"eyebrow":"Bilancio di previsione · contabilità ordinaria","lead":"Allega il conto economico provvisorio in PDF. L'app proietta i mesi mancanti fino a fine anno, aggiunge le rettifiche di chiusura e calcola le imposte: IRES e IRAP per le società di capitali; IRPEF, addizionali, contributi INPS e IRAP per società di persone e imprese individuali in contabilità ordinaria.","step3":"Aggiunge mensilità aggiuntive, TFR e ammortamenti, poi calcola le imposte di competenza e l'utile o il netto disponibile al 31/12."},"semp":{"eyebrow":"Bilancio di previsione · contabilità semplificata","lead":"Allega la situazione economica provvisoria in PDF. L'app proietta incassi e pagamenti fino a fine anno e stima reddito d'impresa, IRPEF con addizionali e contributi INPS del titolare o dei soci, oltre all'IRAP per le società di persone.","step3":"Calcola il reddito d'impresa per cassa, l'IRPEF per scaglioni 2026, le addizionali e i contributi INPS, e verifica la soglia di ricavi della semplificata."},"forf":{"eyebrow":"Bilancio di previsione · regime forfettario","lead":"Allega la situazione provvisoria in PDF. L'app stima ricavi e compensi al 31/12, applica il coefficiente di redditività, calcola imposta sostitutiva e contributi e controlla le soglie di € 85.000 e € 100.000.","step3":"Applica il coefficiente di redditività, calcola imposta sostitutiva e contributi previdenziali e mostra il netto disponibile al 31/12."}};
 function setRegime(r){
@@ -1407,7 +1434,10 @@ function load(){
   if(REGIME==='forf'&&D.coeff) st.ip.coeff=D.coeff;
   if(REGIME==='forf'&&D.sost) st.ip.sost=D.sost;
   if(REGIME==='forf'&&D.prev) st.ip.prev=D.prev;
-  if(REGIME!=='forf'&&D.forma){ st.ip.forma=REGIME==='semp'&&D.forma==='cap'?'ind':D.forma; if(st.ip.forma==='pers') st.ip.soci=[{nome:'Socio 1',quota:50,inps:'com',altri:0},{nome:'Socio 2',quota:50,inps:'com',altri:0}]; }
+  if(REGIME!=='forf'&&D.forma){ st.ip.forma=REGIME==='semp'&&D.forma==='cap'?'ind':D.forma; if(st.ip.forma==='pers') st.ip.soci=[{nome:'Socio 1',quota:50,inps:'',altri:0},{nome:'Socio 2',quota:50,inps:'',altri:0}]; }
+  if(D.tipoAtt) st.ip.tipoAtt=D.tipoAtt;
+  if(REGIME!=='forf'&&D.prev&&st.ip.forma!=='pers') st.ip.soci=[Object.assign({},st.ip.soci[0]||{nome:'Titolare',quota:100,altri:0},{inps:D.prev})];
+  if(D.cassaNome) st.ip.cassaNome=D.cassaNome;
   try{ var raw=localStorage.getItem(key()); if(raw){ var o=JSON.parse(raw); Object.assign(st.ip,o.ip||{}); if(Array.isArray(o.extra)) st.extra=o.extra; Object.keys(o.conti||{}).forEach(function(k){ if(st.conti[k]) Object.assign(st.conti[k],o.conti[k]); }); } }catch(e){}
   return st;
 }
@@ -1446,15 +1476,16 @@ function renderIp(){
 function renderMeseAl(){ var el=$('ip-dataAl'), p=String(D.al||'').split('/'); if(el&&p.length===3) el.value=p[2]+'-'+p[1]+'-'+p[0]; }
 function applyVis(){
   var f=formaCorrente(), pv=S.ip.prev||'gs';
-  Array.prototype.forEach.call(document.querySelectorAll('[data-only],[data-forma],[data-prev]'),function(el){
+  Array.prototype.forEach.call(document.querySelectorAll('[data-only],[data-forma],[data-prev],[data-uso]'),function(el){
     var ok=true;
     if(el.dataset.only) ok=ok&&el.dataset.only.split(' ').indexOf(REGIME)>=0;
     if(el.dataset.forma) ok=ok&&el.dataset.forma.split(' ').indexOf(f)>=0;
     if(el.dataset.prev&&f==='forf') ok=ok&&el.dataset.prev.split(' ').indexOf(pv)>=0;
+    if(el.dataset.uso) ok=ok&&(f==='forf'||f==='ind'||f==='pers')&&el.dataset.uso.split(' ').some(function(g){ return casseInUso().indexOf(g)>=0; });
     if(el.tagName==='OPTION'){ el.disabled=!ok; el.hidden=!ok; } else el.hidden=!ok;
   });
 }
-var GEST_OPTS=[['com','INPS commercianti'],['art','INPS artigiani'],['no','Nessuna gestione INPS']];
+var GEST_OPTS=[['','Scegli la cassa…'],['com','INPS commercianti'],['art','INPS artigiani'],['gs','INPS gestione separata'],['cassa','Cassa professionale'],['no','Nessuna (già coperto)']];
 function renderSoci(){
   var f=formaCorrente(); if(f!=='pers'&&f!=='ind'){ $('sociWrap').innerHTML=''; return; }
   $('sociLegend').textContent=f==='pers'?'Soci':'Titolare';
@@ -1464,7 +1495,7 @@ function renderSoci(){
     h+='<div class="socio"><div class="top"><input type="text" id="so-n-'+i+'" data-si="'+i+'" data-sf="nome" value="'+esc(s.nome)+'" aria-label="Nome '+(f==='pers'?'socio '+(i+1):'titolare')+'">'+
       (f==='pers'&&soci.length>1?'<button class="x" type="button" data-sdel="'+i+'" aria-label="Elimina socio '+(i+1)+'" title="Elimina">×</button>':'')+'</div>'+
       (f==='pers'?'<div class="row2"><label for="so-q-'+i+'">Quota di partecipazione %</label><input class="n" type="number" step="1" min="0" max="100" id="so-q-'+i+'" data-si="'+i+'" data-sf="quota" value="'+num(s.quota)+'"></div>':'')+
-      '<div class="row1"><label for="so-g-'+i+'">Gestione previdenziale</label><select id="so-g-'+i+'" data-si="'+i+'" data-sf="inps">'+GEST_OPTS.map(function(g){ return '<option value="'+g[0]+'"'+(g[0]===s.inps?' selected':'')+'>'+g[1]+'</option>'; }).join('')+'</select></div>'+
+      '<div class="row1"><label for="so-g-'+i+'">Cassa di riferimento per i contributi</label><select id="so-g-'+i+'" data-si="'+i+'" data-sf="inps">'+GEST_OPTS.map(function(g){ return '<option value="'+g[0]+'"'+(g[0]===s.inps?' selected':'')+'>'+g[1]+'</option>'; }).join('')+'</select></div>'+
       '<div class="row2"><label for="so-a-'+i+'">Altri redditi €<br><small class="mut">per l\u2019aliquota marginale</small></label><input class="n" type="number" step="500" min="0" id="so-a-'+i+'" data-si="'+i+'" data-sf="altri" value="'+num(s.altri)+'"></div></div>';
   });
   if(f==='pers'){
@@ -1523,14 +1554,14 @@ function ceLines(){
   });
 }
 function margList(){ return MARG.map(function(x){ return x[1]==='UTILE'?[R.TX.margLast,'UTILE']:x; }); }
-function taxTitle(){ var f=R.TX.forma; return f==='cap'?'Stima delle imposte di competenza':(f==='forf'?'Imposta sostitutiva e contributi':'Reddito d\u2019impresa, imposte e contributi'); }
+function taxTitle(){ var f=R.TX.forma; return f==='cap'?'Stima delle imposte di competenza':(f==='forf'?'Imposta sostitutiva e contributi':(S.ip.tipoAtt==='prof'||S.ip.tipoAtt==='autonomo'?'Reddito di lavoro autonomo, imposte e contributi':'Reddito d\u2019impresa, imposte e contributi')); }
 function taxSub(){ var f=R.TX.forma, ip=S.ip;
   if(f==='cap') return 'IRES '+nf2.format(num(ip.ires))+'% · IRAP '+nf2.format(num(ip.irap))+'%';
   if(f==='forf') return 'Coefficiente '+nf0.format(num(ip.coeff))+'% · sostitutiva '+nf2.format(num(ip.sost))+'% · '+PREV_NAME[ip.prev];
   return (f==='pers'?'IRAP '+nf2.format(num(ip.irap))+'% · ':'')+'IRPEF 2026 · addizionali · INPS'; }
 function renderCE(){
   var t=R.t, ric=t.a26.A1, FO=R.TX.forma;
-  $('ceSub').textContent=FO==='forf'?'Ricavi e costi per natura · i costi non riducono il reddito forfettario':(REGIME==='semp'?'Prospetto per natura · criterio di cassa (art. 66 TUIR) · importi in euro':'Schema art. 2425 c.c. · importi in euro');
+  $('ceSub').textContent=FO==='forf'?'Ricavi e costi per natura · i costi non riducono il reddito forfettario':(REGIME==='semp'?'Prospetto per natura · criterio di cassa (art. '+(S.ip.tipoAtt==='prof'||S.ip.tipoAtt==='autonomo'?'54':'66')+' TUIR) · importi in euro':'Schema art. 2425 c.c. · importi in euro');
   var h='<thead><tr><th>Voce</th><th>Consuntivo<br>'+D.dal.slice(0,5)+'–'+D.al.slice(0,5)+'</th><th class="est">Stima<br>'+residui()+'</th><th class="est">Previsionale<br>al '+fine()+'</th><th>% su<br>ricavi</th></tr></thead><tbody>';
   ceLines().forEach(function(L){
     if(L[0]==='hd'){ h+='<tr class="hd"><td colspan="5">'+esc(L[1])+'</td></tr>'; return; }
@@ -1662,7 +1693,7 @@ function onIp(e){
     if(!Array.isArray(S.ip.soci)||!S.ip.soci.length) S.ip.soci=ipDefault().soci;
     var so=S.ip.soci[+el.dataset.si]; if(!so) return;
     so[el.dataset.sf]=(el.dataset.sf==='nome'||el.dataset.sf==='inps')?el.value:(el.value===''?0:num(el.value));
-    save(); renderAll();
+    save(); renderAll(); if(el.dataset.sf==='inps') applyVis();
     if(el.dataset.sf==='quota'&&e.type==='change') renderSoci();
     return;
   }
@@ -1689,7 +1720,7 @@ $('ip-dataAl').addEventListener('change',function(e){
 });
 $('ipForm').addEventListener('change',function(e){ if(e.target.id==='ip-dataAl') return; if(e.target.tagName==='SELECT'||e.target.type==='checkbox'||e.target.dataset.sf==='quota') onIp(e); });
 $('ipForm').addEventListener('click',function(e){
-  if(e.target.id==='addSocio'){ S.ip.soci.push({nome:'Socio '+(S.ip.soci.length+1),quota:0,inps:'com',altri:0}); save(); renderSoci(); renderAll(); return; }
+  if(e.target.id==='addSocio'){ S.ip.soci.push({nome:'Socio '+(S.ip.soci.length+1),quota:0,inps:'',altri:0}); save(); renderSoci(); renderAll(); return; }
   var d=e.target.closest('[data-sdel]'); if(d){ S.ip.soci.splice(+d.dataset.sdel,1); save(); renderSoci(); renderAll(); }
 });
 $('pdfBtn').addEventListener('click',exportPdf);
@@ -1720,7 +1751,7 @@ async function prelevaGestionale(da){
   setRegime(f.reg);
   var cl=P.clienti().filter(function(c){ return c.id===f.id; })[0]||{};
   D={ragione:r.ragione||P.nomeCliente(f.id), piva:r.piva||cl.piva||'', cf:r.cf||cl.cf||'', indirizzo:r.indirizzo||'', dal:r.dal, al:r.al,
-     conti:r.conti, totali:r.totali, risultato:r.risultato, regimeHint:'', coeff:r.coeffPond||r.coeff||null, sost:r.sost||null, prev:r.prev||'',
+     conti:r.conti, totali:r.totali, risultato:r.risultato, regimeHint:'', coeff:r.coeffPond||r.coeff||null, sost:r.sost||null, prev:r.prev||'', tipoAtt:r.tipoAtt||'', cassaNome:r.cassaNome||'',
      forma:f.reg==='forf'?'':(FORMA_DA_TIPO[cl.tipo]||''), fonte:r.fonte, periodoStimato:false};
   FILE=r.fonte+' · '+r.nReg+' registrazioni'; VIA=''; ULTIMA_FONTE=f; show();
   var note=[];

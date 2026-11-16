@@ -3111,7 +3111,7 @@ html.stampa-pdf .solo-stampa.st-attiva{display:block!important;position:absolute
       indirizzo: [c.sedeIndirizzo || c.resIndirizzo, [c.sedeCap || c.resCap, c.sedeComune || c.resComune].filter(Boolean).join(" ") + ((c.sedeProv || c.resProv) ? ` (${c.sedeProv || c.resProv})` : "")].map(s => String(s || "").trim()).filter(Boolean).join(", "),
       dal: `01/01/${Y}`, al: ceDataIt(al), ultimaReg: ceDataIt(ultima), nReg: regs.length,
       conti, totali: { C, R }, risultato: r2(R - C),
-      coeff: Number(c.coefficiente) || null, coeffPond: atts.length > 1 ? coeffPond : null, sost: Number(c.aliquota) || 15, prev: PREV_GEST[c.gestionePrev] || "", multiAtt: atts.length > 1, nonIncassato: r2(nonInc)
+      coeff: Number(c.coefficiente) || null, coeffPond: atts.length > 1 ? coeffPond : null, sost: Number(c.aliquota) || 15, prev: PREV_GEST[c.gestionePrev] || "", tipoAtt: tipoAtt(c) === "professione" ? (c.gestionePrev === "cassa" ? "prof" : "autonomo") : "impresa", multiAtt: atts.length > 1, nonIncassato: r2(nonInc)
     };
   };
 
