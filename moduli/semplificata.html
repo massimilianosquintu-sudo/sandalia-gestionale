@@ -5631,7 +5631,10 @@ function bluRicostruisci() {
     if (approx) dav.push(R);
   });
   const ultima = X.reduce((m, R) => R.data > m ? R.data : m, "");
-  return { regs, nonRis, vuote, dav, ultima, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
+  // periodo coperto dal libro giornale CSV: le registrazioni con più conti in dare fuori periodo non si possono ricostruire
+  const dateC = C.map(r => r.data).filter(Boolean).sort(), csvDa = dateC[0] || "", csvA = dateC[dateC.length - 1] || "";
+  const fuori = X.filter((R, n) => info[n].acc.size > 1 && (R.data < csvDa || R.data > csvA));
+  return { regs, nonRis, vuote, dav, ultima, csvDa, csvA, fuori, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
 }
 /* tipo di cliente o fornitore dal CSV (tipo riga) e dai partitari */
 function bluCliTipo() {
@@ -5830,6 +5833,7 @@ function bluErrori() {
   if (!BLU.C) e.push("Manca il libro giornale (CSV) con gli importi in dare");
   if (az?.ripresa) e.push("Per questa azienda c'è già una ripresa saldi o un'importazione: annullala prima di importare di nuovo");
   if (BLU.ric) {
+    if (BLU.ric.fuori?.length) e.push(`Il libro giornale CSV copre solo dal ${itDate(BLU.ric.csvDa)} al ${itDate(BLU.ric.csvA)}, mentre il mastrino giornale arriva al ${itDate(BLU.ric.ultima)}: esporta da Blustring il libro giornale CSV di tutto il periodo, dal ${itDate(BLU.ric.primaData)} al ${itDate(BLU.ric.ultima)} (${BLU.ric.fuori.length} registrazioni con più conti in dare non si possono ricostruire)`);
     const anni = new Set(BLU.ric.regs.map(R => Number(R.data.slice(0, 4))));
     if (anni.size > 1) e.push("Il giornale contiene registrazioni di più esercizi");
     else if (anni.size && !anni.has(S.anno)) e.push(`Le registrazioni sono del ${[...anni][0]}: seleziona quell'esercizio in alto`);
@@ -5863,7 +5867,7 @@ function renderBlu() {
   const righe = [];
   if (R) righe.push(`<div><span>Registrazioni dal ${itDate(R.primaData)} al ${itDate(R.ultima)}</span><span class="mono">${R.regs.length}${R.nonRis.length ? ` · <span class="err">${R.nonRis.length} non ricostruite</span>` : " · tutte in quadratura"}${R.vuote.length ? ` · ${R.vuote.length} a importo zero escluse` : ""}</span></div>`);
   const elenco = l => l.slice(0, 12).map(x => `${itDate(x.data)} n. ${esc(x.n)} ${esc(x.desc)} (${num(x.tot)})`).join(" · ") + (l.length > 12 ? ` · e altre ${l.length - 12}` : "");
-  if (R?.dav?.length) righe.push(`<div><span><span class="pill media">da verificare</span> ${R.dav.length} ${R.dav.length === 1 ? "registrazione ha" : "registrazioni hanno"} più conti in dare e nel libro giornale CSV non c'è una combinazione esatta degli importi: si importano con gli importi più vicini, da controllare in prima nota (cerca «da verificare»): ${elenco(R.dav)}</span><span></span></div>`);
+  if (R?.dav?.length && !R.fuori?.length) righe.push(`<div><span><span class="pill media">da verificare</span> ${R.dav.length} ${R.dav.length === 1 ? "registrazione ha" : "registrazioni hanno"} più conti in dare e nel libro giornale CSV non c'è una combinazione esatta degli importi: si importano con gli importi più vicini, da controllare in prima nota (cerca «da verificare»): ${elenco(R.dav)}</span><span></span></div>`);
   if (R?.nonRis?.length) righe.push(`<div><span><span class="pill bassa">non importate</span> ${R.nonRis.length} ${R.nonRis.length === 1 ? "registrazione non quadra" : "registrazioni non quadrano"} nemmeno con il libro giornale CSV e ${R.nonRis.length === 1 ? "va registrata" : "vanno registrate"} a mano dopo l'importazione: ${elenco(R.nonRis)}</span><span></span></div>`);
   if (R && (nCli.size || nFor.size)) righe.push(`<div><span>Clienti e fornitori movimentati</span><span class="mono">${nCli.size} clienti · ${nFor.size} fornitori</span></div>`);
   if (ce) righe.push(`<div><span>Controllo del conto economico con il bilancio di Blustring (${ce.n} conti)</span><span class="mono">${ce.diff.length ? `<span class="err">${ce.diff.length} differenze</span>` : `<span class="ok">identico</span>`} · risultato ${eur(ce.utile)}</span></div>`);
