@@ -559,7 +559,7 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
     <div id="iva-avviso" class="notice" hidden></div>
     <div class="card">
       <div class="row"><h2>Liquidazioni periodiche</h2><span class="spacer"></span>
-        <label class="fld" for="in-cred-prec">Credito IVA dell'anno precedente utilizzato<input type="number" id="in-cred-prec" step="0.01" min="0" inputmode="decimal"></label>
+        <label class="fld" for="in-cred-prec">Credito IVA dell'anno precedente<input type="number" id="in-cred-prec" step="0.01" min="0" inputmode="decimal"><span class="hint" id="cred-prec-nota"></span></label>
         <label class="fld" for="in-acconto">Acconto IVA versato a dicembre<input type="number" id="in-acconto" step="0.01" min="0" inputmode="decimal"></label>
         <label class="fld" for="in-metodo">Metodo dell'acconto<select id="in-metodo"><option value="">—</option><option value="1">1 · Storico</option><option value="2">2 · Previsionale</option><option value="3">3 · Analitico</option><option value="4">4 · Settori particolari</option></select></label>
       </div>
@@ -2636,11 +2636,32 @@ const ESCLUSI_VP2 = new Set(["N1", "N2.2", "N7"]);
 // soglia di versamento minimo: 25,82 € fino al 2023, 100 € dal 2024 (D.Lgs. 1/2024, art. 9)
 const sogliaIva = anno => anno >= 2024 ? 100 : 25.82;
 let LIQ_OVR = null;   // anteprima dell'inserimento di un periodo del programma precedente
+/* credito IVA dell'anno precedente dai saldi di apertura al 1° gennaio (riapertura dei conti, ripresa saldi o importazione):
+   saldo a credito dei conti «IVA c/erario da compensare» (35.01.14), «Erario c/IVA anni precedenti» (35.01.91) e
+   «Erario c/liquidazione IVA» (35.01.11). Residuo a una data: saldo dei primi due conti, che le compensazioni in F24 e
+   l'utilizzo nelle liquidazioni del programma precedente hanno già ridotto. */
+const IVA_CRED_ANNO = ["35.01.14", "35.01.91"];
+function creditoIvaApertura(az) {
+  const Y = `${S.anno}-01-01`, conti = new Set([...IVA_CRED_ANNO, K.ivaLiq]), saldo = new Map();
+  for (const r of S.regs) if (r.causale === "AP" && r.dataReg === Y) for (const x of r.righe || []) if (conti.has(x.conto)) saldo.set(x.conto, (saldo.get(x.conto) || 0) + (x.dare || 0) - (x.avere || 0));
+  // ogni conto conta solo se a credito: il debito della liquidazione di dicembre (da versare a gennaio) non riduce il credito annuale
+  return r2([...saldo.values()].reduce((t, v) => t + Math.max(0, v), 0));
+}
+function creditoIvaResiduo(data) {
+  const Y0 = `${S.anno}-01-01`, conti = new Set(IVA_CRED_ANNO); let t = 0, ap = false;
+  for (const r of S.regs) {
+    if (r.dataReg < Y0 || r.dataReg > data) continue;
+    for (const x of r.righe || []) if (conti.has(x.conto)) { t += (x.dare || 0) - (x.avere || 0); if (r.causale === "AP") ap = true; }
+  }
+  return ap ? Math.max(0, r2(t)) : null;
+}
 function liquidazioni() {
   const az = aziendaCorrente(); if (!az) return [];
   const Y = String(S.anno), conf = (az.iva || {})[Y] || {}, man = LIQ_OVR ? { ...(conf.liqPre || {}), [LIQ_OVR.p]: LIQ_OVR.M } : (conf.liqPre || {});
-  let credAnnoRes = r2(conf.credPrec || 0), debRip = 0, credRip = 0, primo = true, ultimoManuale = false;
+  let credAnnoRes = r2(conf.credPrec || creditoIvaApertura(az)), debRip = 0, credRip = 0, primo = true, ultimoManuale = false;
   const rip = az.ripresa && az.ripresa.tipo === "corso" && az.ripresa.anno === S.anno ? az.ripresa : null;
+  // credito ancora disponibile dopo i periodi liquidati nel programma precedente: dal saldo dei conti alla data della ripresa
+  const residuoRip = rip && !conf.credPrec ? creditoIvaResiduo(rip.data) : null;
   return periodi(az).map(p => {
     let M = null;
     if (rip) {
@@ -2650,7 +2671,7 @@ function liquidazioni() {
         // periodo liquidato nel programma precedente e non inserito: non se ne conoscono gli importi
         if (!M) { debRip = 0; credRip = 0; ultimoManuale = false; return { p, pre: true, vp2: 0, vp3: 0, vp4: 0, vp5: 0, vp6: 0, vp7: 0, vp8: 0, vp9: 0, vp12: 0, vp13: 0, vp14: 0, versare: 0, credito: 0, cod: "", scad: "", riporto: 0 }; }
         ultimoManuale = true;
-      } else if (primo) { if (!ultimoManuale) { credRip = r2(rip.credIva || 0); debRip = 0; } primo = false; }
+      } else if (primo) { if (!ultimoManuale) { credRip = r2(rip.credIva || 0); debRip = 0; } if (residuoRip != null) credAnnoRes = residuoRip; primo = false; }
     }
     let vp2 = 0, vp3 = 0, vp4 = 0, vp5 = 0;
     if (M) { vp2 = Number(M.vp2) || 0; vp3 = Number(M.vp3) || 0; vp4 = Number(M.vp4) || 0; vp5 = Number(M.vp5) || 0; }
@@ -2721,6 +2742,7 @@ function renderIVA() {
   avv.hidden = !!az.periodicita; avv.textContent = "Indica la periodicità delle liquidazioni IVA nella scheda Azienda: fino ad allora i periodi sono mensili.";
   const Y = String(S.anno), conf = (az.iva || {})[Y] || {};
   for (const [id, k] of [["#in-cred-prec", "credPrec"], ["#in-acconto", "acconto"], ["#in-metodo", "metodo"]]) if (document.activeElement !== $(id)) $(id).value = conf[k] || "";
+  { const auto = creditoIvaApertura(az), el = $("#in-cred-prec"); el.placeholder = auto ? num(auto) : ""; el.title = auto ? `Dai saldi di apertura al 1° gennaio: ${num(auto)} €. Scrivi un importo solo per cambiarlo.` : ""; const n = $("#cred-prec-nota"); if (n) n.textContent = !conf.credPrec && auto ? `dai saldi di apertura: ${num(auto)} €` : ""; }
   const liqAll = liquidazioni(), nPre = liqAll.filter(l => l.pre && !l.manuale).length, nMan = liqAll.filter(l => l.manuale).length;
   $("#liq-pre-bar").hidden = !nPre && !nMan;
   $("#liq-pre-auto").textContent = nMan && !nPre ? "Ricalcola dalle registrazioni" : "Ricava dalle registrazioni importate";
