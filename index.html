@@ -182,6 +182,13 @@ fieldset{border:1px solid var(--line);border-radius:10px;padding:12px 16px 16px;
 legend{font-weight:700;font-size:14px;padding:0 6px}
 .fg{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:10px 12px}
 .fg .w2{grid-column:span 2} .fg .wa{grid-column:1/-1}
+.soc-tit{font-size:13px;margin:16px 0 8px;font-weight:600}
+.socio{border:1px solid var(--line);border-radius:8px;padding:10px 12px 12px;margin-top:10px;background:var(--bg)}
+.socio .sh{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;font-weight:600}
+.socio .sh .sp{flex:1}
+.socio .chk{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;padding-top:18px;color:var(--ink);font-size:13px}
+.socio .chk input{width:auto;flex:none;margin:0}
+.soci-tot{margin-top:8px;font-size:12px;color:var(--muted)}
 .fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:500;min-width:0}
 .fld input,.fld select,.fld textarea{border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:7px 9px;font-size:14px;color:var(--ink);min-width:0;width:100%}
 .fld textarea{min-height:64px;resize:vertical}
@@ -352,6 +359,19 @@ legend{font-weight:700;font-size:14px;padding:0 6px}
             <label class="fld w2" for="k-rapp-car">Carica nei frontespizi<select id="k-rapp-car"><option value="1">1 · Rappresentante legale o amministratore</option><option value="2">2 · Rappresentante di minore, inabilitato o interdetto</option><option value="5">5 · Custode o amministratore giudiziario</option><option value="6">6 · Rappresentante fiscale di non residente</option><option value="7">7 · Erede</option><option value="8">8 · Liquidatore (liquidazione volontaria)</option><option value="3">3 · Curatore fallimentare</option><option value="4">4 · Commissario liquidatore</option><option value="9">9 · Soggetto da operazioni straordinarie</option></select></label>
           </div></fieldset>
 
+          <fieldset data-tipi="SP SC" id="k-soc-box"><legend>Camera di commercio e compagine sociale</legend><div class="fg">
+            <label class="fld" for="k-cciaa">CCIAA di riferimento<input id="k-cciaa" list="dl-cciaa" autocomplete="off" placeholder="es. Sassari"></label>
+            <label class="fld" for="k-rea">Numero REA<input id="k-rea" class="mono" autocomplete="off" placeholder="es. SS-123456"><span class="h" id="k-rea-h"></span></label>
+            <label class="fld" for="k-ri-data">Iscrizione al Registro delle imprese<input id="k-ri-data" type="date"></label>
+            <label class="fld" for="k-compagine">Compagine sociale<select id="k-compagine"><option value="">Da indicare</option><option value="unico">Socio unico</option><option value="piu">Più soci</option></select></label>
+            <label class="fld" for="k-cap-sott">Capitale sociale sottoscritto (€)<input id="k-cap-sott" class="mono" inputmode="decimal" autocomplete="off"></label>
+            <label class="fld" for="k-cap-vers">Capitale versato (€)<input id="k-cap-vers" class="mono" inputmode="decimal" autocomplete="off"></label>
+          </div>
+          <h3 class="soc-tit">Soci e quote di partecipazione</h3>
+          <div id="k-soci"></div>
+          <div class="row" style="margin-top:10px"><button type="button" class="btn sm" id="k-soci-add">Aggiungi socio</button><span class="h" id="k-soci-h" role="status"></span></div>
+          </fieldset>
+
           <fieldset><legend>Intermediario per l’invio telematico</legend><div class="fg">
             <label class="fld" for="k-int-cf">Codice fiscale dell’intermediario<input id="k-int-cf" class="mono" maxlength="16" autocomplete="off"><span class="h" id="k-int-h"></span></label>
             <label class="fld w2" for="k-int-den">Denominazione<input id="k-int-den" autocomplete="off"></label>
@@ -375,6 +395,7 @@ legend{font-weight:700;font-size:14px;padding:0 6px}
   </section>
 </main>
 <datalist id="dl-ateco"></datalist>
+<datalist id="dl-cciaa"><option value="Sassari"><option value="Nuoro"><option value="Cagliari-Oristano"><option value="Roma"><option value="Milano Monza Brianza Lodi"><option value="Torino"><option value="Napoli"><option value="Genova"><option value="Firenze"><option value="Bologna"></datalist>
 
 <script>/* Navigazione interna: le sezioni si aprono sempre nella stessa pagina, senza nuove pagine o schede */
 (function(){
@@ -982,7 +1003,8 @@ const CAMPI = [ // [id, chiave, trasformazione]
   ['k-email', 'email'], ['k-pec', 'pec'], ['k-tel', 'telefono'],
   ['k-ateco', 'ateco'], ['k-att', 'attivita'], ['k-inizio', 'dataInizio'], ['k-regime', 'regime'], ['k-period', 'periodicita'],
   ['k-rapp-nome', 'rappNome'], ['k-rapp-cf', 'rappCf', 'up'], ['k-rapp-car', 'rappCarica'],
-  ['k-int-cf', 'intCf', 'up'], ['k-int-den', 'intDenominazione'], ['k-int-imp', 'intImp'], ['k-int-data', 'intData'], ['k-note', 'note']
+  ['k-int-cf', 'intCf', 'up'], ['k-int-den', 'intDenominazione'], ['k-int-imp', 'intImp'], ['k-int-data', 'intData'], ['k-note', 'note'],
+  ['k-cciaa', 'cciaa'], ['k-rea', 'rea', 'up'], ['k-ri-data', 'riData'], ['k-compagine', 'compagine'], ['k-cap-sott', 'capSottoscritto', 'importo'], ['k-cap-vers', 'capVersato', 'importo']
 ];
 const nomeCli = c => c ? (c.tipo === 'PF' && (c.cognome || c.nome) ? [c.cognome, c.nome].filter(Boolean).join(' ') : (c.denominazione || [c.cognome, c.nome].filter(Boolean).join(' '))) || '(senza nome)' : '';
 const chiavi = x => { const k = []; const cf = up(x.cf).replace(/\s/g, ''), pi = cifre(x.piva); if (cf) k.push(cf); if (pi) k.push(pi); return k; };
@@ -1381,6 +1403,7 @@ function visibilita() {
   const t = $('#k-tipo').value;
   $$('#cl-form [data-solo]').forEach(el => el.hidden = el.dataset.solo !== t);
   $$('#cl-form [data-non]').forEach(el => el.hidden = el.dataset.non === t);
+  $$('#cl-form [data-tipi]').forEach(el => el.hidden = !el.dataset.tipi.split(' ').includes(t));
   $('#k-sede-leg').textContent = t === 'PF' ? 'Sede dell’attività o domicilio fiscale' : 'Sede legale';
 }
 $('#k-tipo').addEventListener('change', () => { const t = $('#k-tipo').value; formeTipo(t); if (t === 'PF' && $('#k-regime').value === 'ordinaria' && (!SCHEDA || SCHEDA.nuovo)) $('#k-regime').value = 'forfettaria'; visibilita(); verificaCf('k-cf', 'k-cf-h', t === 'PF' ? 'vuoti' : false); });
@@ -1394,7 +1417,9 @@ function apriScheda(id) {
   for (const [fid, k] of CAMPI) { if (fid === 'k-forma') continue; const el = $('#' + fid); el.value = c[k] ?? (el.tagName === 'SELECT' ? el.options[0]?.value ?? '' : ''); }
   $('#k-tipo').value = c.tipo || 'SC'; formeTipo($('#k-tipo').value, c.forma);
   visibilita();
-  ['k-cf-h', 'k-piva-h', 'k-rapp-h', 'k-int-h', 'k-sede-h', 'k-res-h', 'k-ateco-h'].forEach(h => hint(h, ''));
+  for (const k of ['capSottoscritto', 'capVersato']) { const el = $(k === 'capSottoscritto' ? '#k-cap-sott' : '#k-cap-vers'); el.value = c[k] === '' || c[k] == null ? '' : socFmt(c[k]); }
+  SOCI = (c.soci || []).map(x => ({ ...x })); renderSoci();
+  ['k-cf-h', 'k-piva-h', 'k-rapp-h', 'k-int-h', 'k-sede-h', 'k-res-h', 'k-ateco-h', 'k-rea-h'].forEach(h => hint(h, ''));
   if (c.cf) verificaCf('k-cf', 'k-cf-h', (c.tipo || 'SC') === 'PF' ? 'vuoti' : false);
   $('#cl-titolo').textContent = SCHEDA.nuovo ? 'Nuovo cliente' : nomeCli(c);
   $('#k-elimina').hidden = !!SCHEDA.nuovo; $('#k-elimina').textContent = 'Elimina dall’anagrafica'; delete $('#k-elimina').dataset.conf;
@@ -1404,6 +1429,118 @@ function apriScheda(id) {
   $('#pg-clienti').scrollTop = 0;
   renderLinks();
 }
+
+/* ======================= SOCI E QUOTE (società di persone e di capitali) ======================= */
+let SOCI = [];
+const DIRITTI = { proprieta: 'Piena proprietà', nuda: 'Nuda proprietà', usufrutto: 'Usufrutto', comproprieta: 'Comproprietà', pegno: 'Pegno' };
+const socNum = v => { const t = String(v ?? '').trim().replace(/\s|€|%/g, ''); if (!t) return 0; const n = Number(/,\d{1,2}$/.test(t) || (t.includes(',') && !t.includes('.')) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : 0; };
+const socFmt = n => (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const socVuoto = () => ({ tipo: 'PF', nome: '', cf: '', sesso: '', nascitaData: '', nascitaComune: '', nascitaProv: '', indirizzo: '', comune: '', prov: '', cap: '', quota: '', valore: '', diritto: 'proprieta', amministratore: false, legale: false });
+const socPulito = x => ({ tipo: x.tipo === 'PG' ? 'PG' : 'PF', nome: String(x.nome || '').trim(), cf: up(x.cf).replace(/\s/g, ''), sesso: x.tipo === 'PG' ? '' : (x.sesso || ''), nascitaData: x.tipo === 'PG' ? '' : (x.nascitaData || ''), nascitaComune: x.tipo === 'PG' ? '' : up(x.nascitaComune || ''), nascitaProv: x.tipo === 'PG' ? '' : up(x.nascitaProv || ''),
+  indirizzo: String(x.indirizzo || '').trim(), comune: up(x.comune || ''), prov: up(x.prov || ''), cap: String(x.cap || '').trim(), quota: x.quota === '' || x.quota == null ? '' : socNum(x.quota), valore: x.valore === '' || x.valore == null ? '' : socNum(x.valore), diritto: DIRITTI[x.diritto] ? x.diritto : 'proprieta', amministratore: !!x.amministratore, legale: !!x.legale, valoreAuto: !!x.valoreAuto });
+/* quote che concorrono al 100%: l'usufrutto e il pegno non si sommano alla nuda o piena proprietà della stessa quota */
+const socContaQuota = x => !['usufrutto', 'pegno'].includes(x.diritto);
+function renderSoci() {
+  const box = $('#k-soci'); if (!box) return;
+  const campo = (i, k, lab, extra = '', cls = '') => `<label class="fld ${cls}">${lab}<input data-si="${i}" data-sk="${k}" value="${esc(SOCI[i][k] ?? '')}" ${extra}></label>`;
+  box.innerHTML = SOCI.length ? SOCI.map((x, i) => `<div class="socio" data-si="${i}">
+    <div class="sh"><span class="sp">Socio ${i + 1}${x.nome ? ' · ' + esc(x.nome) : ''}</span><button type="button" class="btn sm ghost" data-sdel="${i}">Rimuovi</button></div>
+    <div class="fg">
+      <label class="fld">Tipo<select data-si="${i}" data-sk="tipo"><option value="PF"${x.tipo !== 'PG' ? ' selected' : ''}>Persona fisica</option><option value="PG"${x.tipo === 'PG' ? ' selected' : ''}>Società o ente</option></select></label>
+      ${campo(i, 'nome', x.tipo === 'PG' ? 'Denominazione' : 'Cognome e nome', 'autocomplete="off"', 'w2')}
+      <label class="fld">Codice fiscale<input data-si="${i}" data-sk="cf" class="mono" maxlength="16" autocomplete="off" value="${esc(x.cf || '')}"><span class="h" id="k-soc-h-${i}"></span></label>
+      ${x.tipo === 'PG' ? '' : `<label class="fld">Sesso<select data-si="${i}" data-sk="sesso"><option value="">–</option><option value="M"${x.sesso === 'M' ? ' selected' : ''}>M</option><option value="F"${x.sesso === 'F' ? ' selected' : ''}>F</option></select></label>
+      ${campo(i, 'nascitaData', 'Data di nascita', 'type="date"')}${campo(i, 'nascitaComune', 'Comune o Stato estero di nascita')}${campo(i, 'nascitaProv', 'Provincia', 'maxlength="2" class="mono"')}`}
+      ${campo(i, 'indirizzo', x.tipo === 'PG' ? 'Sede: indirizzo' : 'Residenza: indirizzo', '', 'w2')}${campo(i, 'comune', 'Comune')}${campo(i, 'prov', 'Provincia', 'maxlength="2" class="mono"')}${campo(i, 'cap', 'CAP', 'maxlength="5" inputmode="numeric" class="mono"')}
+      ${campo(i, 'quota', 'Quota (%)', 'inputmode="decimal" class="mono"')}${campo(i, 'valore', 'Valore nominale (€)', 'inputmode="decimal" class="mono"')}
+      <label class="fld">Diritto<select data-si="${i}" data-sk="diritto">${Object.entries(DIRITTI).map(([k, n]) => `<option value="${k}"${(x.diritto || 'proprieta') === k ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label class="fld chk"><input type="checkbox" data-si="${i}" data-sk="amministratore"${x.amministratore ? ' checked' : ''}> Amministratore</label>
+      <label class="fld chk"><input type="checkbox" data-si="${i}" data-sk="legale"${x.legale ? ' checked' : ''}> Rappresentante legale</label>
+    </div></div>`).join('') : '<p class="h">Nessun socio inserito.</p>';
+  socRiepilogo();
+}
+function socRiepilogo() {
+  const h = $('#k-soci-h'); if (!h) return;
+  const tot = SOCI.filter(socContaQuota).reduce((s, x) => s + socNum(x.quota), 0), val = SOCI.filter(socContaQuota).reduce((s, x) => s + socNum(x.valore), 0), cap = socNum($('#k-cap-sott')?.value);
+  if (!SOCI.length) { hint('k-soci-h', ''); return; }
+  const parti = [`${SOCI.length} ${SOCI.length === 1 ? 'socio' : 'soci'}`, `quote ${socFmt(tot)}%`];
+  if (val) parti.push(`valore nominale ${socFmt(val)} €${cap ? ' su un capitale di ' + socFmt(cap) + ' €' : ''}`);
+  const ok = Math.abs(tot - 100) < 0.01 && (!val || !cap || Math.abs(val - cap) < 0.01);
+  hint('k-soci-h', parti.join(' · ') + (ok ? '' : Math.abs(tot - 100) >= 0.01 ? ' · la somma delle quote deve essere 100%' : ' · il valore nominale non coincide con il capitale sottoscritto'), ok ? 'ok' : 'warn');
+}
+/* codice fiscale del socio: dati di nascita dal codice e, se il socio è già cliente dello Studio, anagrafica dalla sua scheda */
+function socDaCf(i, el) {
+  const x = SOCI[i], v = up(x.cf).replace(/\s/g, ''), hid = 'k-soc-h-' + i;
+  if (!v) { hint(hid, ''); return; }
+  const cli = CLIENTI.find(c => chiavi(c).includes(v) && (!SCHEDA || c.id !== SCHEDA.id));
+  let cambi = false; const metti = (k, val) => { if (val && !x[k]) { x[k] = val; cambi = true; } };
+  if (cli) {
+    if (cli.tipo !== 'PF') x.tipo = 'PG';
+    metti('nome', nomeCli(cli)); metti('sesso', cli.sesso); metti('nascitaData', cli.nascitaData); metti('nascitaComune', cli.nascitaComune); metti('nascitaProv', cli.nascitaProv);
+    metti('indirizzo', cli.tipo === 'PF' ? cli.resIndirizzo || cli.sedeIndirizzo : cli.sedeIndirizzo); metti('comune', cli.tipo === 'PF' ? cli.resComune || cli.sedeComune : cli.sedeComune);
+    metti('prov', cli.tipo === 'PF' ? cli.resProv || cli.sedeProv : cli.sedeProv); metti('cap', cli.tipo === 'PF' ? cli.resCap || cli.sedeCap : cli.sedeCap);
+  }
+  if (/^[A-Z0-9]{16}$/.test(v)) {
+    const d = decodCf(v);
+    if (!d) { hint(hid, 'Struttura del codice fiscale non valida', 'err'); return; }
+    if (!d.controllo) { hint(hid, `Carattere di controllo errato: atteso ${ctrlCf(v)}`, 'err'); return; }
+    x.tipo = 'PF'; metti('sesso', d.sesso); metti('nascitaData', d.data); metti('nascitaComune', d.comune); metti('nascitaProv', d.prov);
+  } else if (/^\d{11}$/.test(v)) { if (!pivaOk(v)) { hint(hid, 'Codice fiscale numerico non valido', 'err'); return; } x.tipo = 'PG'; }
+  else { hint(hid, v.length < 11 ? '' : 'Codice fiscale non valido', v.length < 11 ? '' : 'err'); return; }
+  if (cambi) { const pos = el ? el.selectionStart : null; renderSoci(); const n = $(`#k-soci input[data-si="${i}"][data-sk="cf"]`); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } }
+  hint(hid, cli ? `Cliente dello Studio: ${nomeCli(cli)}` : 'Codice fiscale valido', 'ok');
+}
+function controllaSoci(o) {
+  const e = []; if (!['SP', 'SC'].includes(o.tipo)) return e;
+  const l = o.soci || [];
+  l.forEach((x, i) => {
+    if (!x.nome) e.push(`Socio ${i + 1}: indica ${x.tipo === 'PG' ? 'la denominazione' : 'cognome e nome'}`);
+    if (x.cf && !(/^\d{11}$/.test(x.cf) ? pivaOk(x.cf) : (decodCf(x.cf) || {}).controllo)) e.push(`Socio ${i + 1}: codice fiscale non valido`);
+    if (x.quota !== '' && (x.quota < 0 || x.quota > 100)) e.push(`Socio ${i + 1}: la quota è una percentuale tra 0 e 100`);
+    if (x.cap && !/^\d{5}$/.test(x.cap)) e.push(`Socio ${i + 1}: il CAP ha 5 cifre`);
+    if (x.prov && !/^[A-Z]{2}$/.test(x.prov)) e.push(`Socio ${i + 1}: la provincia è una sigla di 2 lettere`);
+  });
+  const cf = l.filter(x => x.cf && socContaQuota(x)).map(x => x.cf), dup = cf.find((c, i) => cf.indexOf(c) !== i);
+  if (dup) e.push(`Lo stesso socio (${dup}) compare due volte con la stessa quota: unisci le quote`);
+  if (o.compagine === 'unico' && l.filter(socContaQuota).length > 1) e.push('Con il socio unico indica un solo socio titolare della quota');
+  if (o.compagine === 'unico' && o.tipo === 'SP') e.push('Le società di persone hanno almeno due soci: con un solo socio va ricostituita la pluralità entro sei mesi');
+  if (o.compagine === 'piu' && l.length === 1) e.push('Hai indicato più soci ma ne è inserito uno solo');
+  const conQuota = l.filter(x => socContaQuota(x) && x.quota !== '');
+  if (conQuota.length) { const tot = conQuota.reduce((s, x) => s + x.quota, 0); if (Math.abs(tot - 100) >= 0.01) e.push(`La somma delle quote è ${socFmt(tot)}%: deve essere 100%`); }
+  if (o.capVersato !== '' && o.capSottoscritto !== '' && o.capVersato > o.capSottoscritto) e.push('Il capitale versato non può superare il sottoscritto');
+  if (o.rea && !/^[A-Z]{2}-?\d{1,7}$/.test(o.rea)) e.push('Numero REA: sigla della provincia e numero, es. SS-123456');
+  return e;
+}
+$('#k-soci-add').addEventListener('click', () => {
+  SOCI.push(socVuoto());
+  if (!$('#k-compagine').value) $('#k-compagine').value = SOCI.length > 1 ? 'piu' : '';
+  if (SOCI.length > 1 && $('#k-compagine').value === 'unico') $('#k-compagine').value = 'piu';
+  renderSoci(); const l = $$('#k-soci input[data-sk="cf"]'); if (l.length) l[l.length - 1].focus();
+});
+$('#k-soci').addEventListener('click', e => {
+  const b = e.target.closest('[data-sdel]'); if (!b) return;
+  SOCI.splice(Number(b.dataset.sdel), 1); renderSoci();
+});
+$('#k-soci').addEventListener('input', e => {
+  const el = e.target, i = Number(el.dataset.si), k = el.dataset.sk; if (!k || !SOCI[i]) return;
+  SOCI[i][k] = el.type === 'checkbox' ? el.checked : el.value;
+  if (k === 'cf') socDaCf(i, el);
+  if (k === 'nome') { const t = $(`#k-soci .socio[data-si="${i}"] .sh .sp`); if (t) t.textContent = `Socio ${i + 1}${el.value ? ' · ' + el.value : ''}`; }
+  if (k === 'quota' || k === 'valore') socRiepilogo();
+});
+$('#k-soci').addEventListener('change', e => {
+  const el = e.target, i = Number(el.dataset.si), k = el.dataset.sk; if (!k || !SOCI[i]) return;
+  SOCI[i][k] = el.type === 'checkbox' ? el.checked : el.value;
+  if (k === 'tipo') setTimeout(renderSoci, 0);
+  // valore nominale dalla quota e dal capitale sottoscritto, se non indicato
+  if (k === 'quota') { const cap = socNum($('#k-cap-sott').value); if (cap && SOCI[i].quota !== '' && (SOCI[i].valore === '' || SOCI[i].valore == null || SOCI[i].valoreAuto)) { SOCI[i].valore = socFmt(cap * socNum(SOCI[i].quota) / 100); SOCI[i].valoreAuto = true; setTimeout(renderSoci, 0); } }
+  if (k === 'valore') SOCI[i].valoreAuto = false;
+  if (k === 'legale' && el.checked && !$('#k-rapp-cf').value && SOCI[i].cf) { $('#k-rapp-cf').value = SOCI[i].cf; if (!$('#k-rapp-nome').value) $('#k-rapp-nome').value = SOCI[i].nome; verificaCf('k-rapp-cf', 'k-rapp-h'); }
+});
+$('#k-cap-sott').addEventListener('input', socRiepilogo);
+$('#k-compagine').addEventListener('change', () => { if ($('#k-compagine').value === 'unico' && SOCI.length === 1 && !SOCI[0].quota) { SOCI[0].quota = '100'; renderSoci(); } });
+$('#k-sede-prov').addEventListener('change', () => { if ($('#k-cciaa').value) return; const p = up($('#k-sede-prov').value); const m = { SS: 'Sassari', NU: 'Nuoro', CA: 'Cagliari-Oristano', OR: 'Cagliari-Oristano', SU: 'Cagliari-Oristano' }; if (m[p]) $('#k-cciaa').value = m[p]; });
+$('#k-rea').addEventListener('input', () => { const v = up($('#k-rea').value).replace(/\s/g, ''); hint('k-rea-h', !v ? '' : /^[A-Z]{2}-?\d{1,7}$/.test(v) ? 'Formato corretto' : 'Sigla della provincia e numero, es. SS-123456', !v ? '' : /^[A-Z]{2}-?\d{1,7}$/.test(v) ? 'ok' : 'warn'); });
 $('#cl-indietro').addEventListener('click', () => { SCHEDA = null; renderClienti(); });
 $('#cl-attiva').addEventListener('click', () => { if (!SCHEDA || SCHEDA.nuovo) return; setAttivo(ATTIVO === SCHEDA.id ? null : SCHEDA.id); $('#cl-attiva').textContent = ATTIVO === SCHEDA.id ? 'Cliente attivo ✓' : 'Imposta come cliente attivo'; toast(ATTIVO ? `${nomeCli(SCHEDA)} è il cliente attivo: le contabilità si aprono su di lui.` : 'Nessun cliente attivo.'); });
 $('#k-int-usa').addEventListener('click', () => {
@@ -1419,7 +1556,8 @@ $('#k-int-salva').addEventListener('click', async () => {
 });
 function leggiForm() {
   const o = {};
-  for (const [fid, k, tr] of CAMPI) { let v = $('#' + fid).value; v = typeof v === 'string' ? v.trim() : v; if (tr === 'up') v = up(v).replace(/\s/g, k.endsWith('Cf') || k === 'cf' ? '' : ' '); if (tr === 'cifre') v = cifre(v); o[k] = v; }
+  for (const [fid, k, tr] of CAMPI) { let v = $('#' + fid).value; v = typeof v === 'string' ? v.trim() : v; if (tr === 'up') v = up(v).replace(/\s/g, k.endsWith('Cf') || k === 'cf' ? '' : ' '); if (tr === 'cifre') v = cifre(v); if (tr === 'importo') v = v === '' ? '' : socNum(v); o[k] = v; }
+  o.soci = ['SP', 'SC'].includes(o.tipo) ? SOCI.map(socPulito).filter(x => x.nome || x.cf) : [];
   if (o.tipo === 'PF') { o.denominazione = o.denominazione || ''; } else { o.cognome = ''; o.nome = ''; }
   return o;
 }
@@ -1434,6 +1572,7 @@ function controlla(o) {
   for (const [id, k] of [['k-sede-cap', 'sedeCap'], ['k-res-cap', 'resCap']]) if (o[k] && !/^\d{5}$/.test(o[k])) seg(id, 'Il CAP ha 5 cifre');
   for (const [id, k] of [['k-sede-prov', 'sedeProv'], ['k-res-prov', 'resProv'], ['k-nasc-prov', 'nascitaProv']]) if (o[k] && !/^[A-Z]{2}$/.test(o[k])) seg(id, 'La provincia è una sigla di 2 lettere');
   for (const id of ['k-email', 'k-pec']) { const v = $('#' + id).value.trim(); if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) seg(id, 'Indirizzo e-mail non valido'); }
+  for (const m of controllaSoci(o)) e.push(m);
   const altro = CLIENTI.find(c => c.id !== (SCHEDA && SCHEDA.id) && stessoSoggetto(c, o));
   if (altro) e.push(`Esiste già in anagrafica con lo stesso codice: ${nomeCli(altro)}`);
   return [...new Set(e)];
@@ -1454,6 +1593,7 @@ $('#cl-form').addEventListener('submit', async e => {
     if (lk.forf) { await scriviModulo('forf', versoForf(c, lk.forf)); fatti.push('Contabilità Forfettaria'); if (!c.forfId) c.forfId = lk.forf.id; }
     if ((lk.ord && !base?.ordId) || (lk.semp && !base?.sempId) || (lk.forf && !base?.forfId)) await cliPut(c);
     SCHEDA = c;
+    const xb = xbrlAggiorna(c); if (xb.length) fatti.push(`il Bilancio XBRL aperto (${xb.join(', ')})`);
     msg.textContent = (base ? 'Modifiche salvate.' : 'Cliente creato.') + (fatti.length ? ` Aggiornata anche: ${fatti.join(' e ')}.` : '');
     msg.className = 'msg ok';
     $('#cl-titolo').textContent = nomeCli(c); $('#k-elimina').hidden = false; $('#cl-attiva').hidden = false;
@@ -1568,6 +1708,27 @@ async function contoEconomicoDa(regime, idCli, opz) {
   return JSON.parse(JSON.stringify(r || { errore: 'Nessuna risposta dal modulo di contabilità.' }));
 }
 
+
+/* ======================= DATI ANAGRAFICI PER IL BILANCIO XBRL ======================= */
+const FORMA_XBRL = { SRL: "SOCIETA' A RESPONSABILITA' LIMITATA", SRLS: "SOCIETA' A RESPONSABILITA' LIMITATA SEMPLIFICATA", SPA: "SOCIETA' PER AZIONI", SAPA: "SOCIETA' IN ACCOMANDITA PER AZIONI", COOP: "SOCIETA' COOPERATIVA", SNC: "SOCIETA' IN NOME COLLETTIVO", SAS: "SOCIETA' IN ACCOMANDITA SEMPLICE", SS: "SOCIETA' SEMPLICE" };
+function anagraficaXbrl(c) {
+  if (!c) return null;
+  const sede = [c.sedeIndirizzo, [c.sedeCap, c.sedeComune].filter(Boolean).join(' ') + (c.sedeProv ? ` (${c.sedeProv})` : '')].map(x => String(x || '').trim()).filter(Boolean).join(' - ');
+  const rea = up(c.rea || '').replace(/\s/g, ''), sigla = (/^([A-Z]{2})-?\d/.exec(rea) || [])[1] || up(c.sedeProv || '');
+  const num = v => v === '' || v == null ? undefined : Number(v);
+  const sott = num(c.capSottoscritto), vers = num(c.capVersato);
+  return {
+    den: nomeCli(c), cf: up(c.cf || ''), piva: cifre(c.piva || ''), sede, rea: rea ? rea.replace(/^([A-Z]{2})-?/, '$1 ') : '', cciaa: sigla,
+    forma: FORMA_XBRL[c.forma] || '', ateco: c.ateco || '', capitale: sott, versato: sott != null && vers != null ? vers >= sott : undefined,
+    liquidazione: c.stato === 'liquidazione', socioUnico: c.compagine === 'unico' ? true : c.compagine === 'piu' ? false : undefined
+  };
+}
+function xbrlAggiorna(c) {
+  const w = frames.xbrl && frames.xbrl.loaded && frames.xbrl.el.contentWindow;
+  if (!w || !w.portaleAnagrafica) return [];
+  try { return w.portaleAnagrafica(anagraficaXbrl(c)) || []; } catch (e) { return []; }
+}
+
 /* ======================= API PER I MODULI ======================= */
 window.PORTALE = {
   versione: '1.0',
@@ -1579,6 +1740,8 @@ window.PORTALE = {
   regimeCliente: id => { const c = CLIENTI.find(x => x.id === id); return c ? regimeDi(c) : ''; },
   nomeCliente: id => nomeCli(CLIENTI.find(x => x.id === id)),
   contoEconomico: (regime, idCli, opz) => contoEconomicoDa(regime, idCli, opz),
+  /* dati anagrafici del cliente (dal codice fiscale o dalla partita IVA, altrimenti il cliente attivo) per il Bilancio XBRL */
+  anagraficaXbrl: cf => { if (cf === '-') return null; const k = up(cf || '').replace(/[^A-Z0-9]/g, ''); const c = k ? CLIENTI.find(x => chiavi(x).includes(k)) : CLIENTI.find(x => x.id === ATTIVO); return c ? anagraficaXbrl(c) : null; },
   toast,
   /* archivio: usato dal collegamento a Supabase della versione sul computer per caricare nel cloud i dati del browser */
   archivio: {

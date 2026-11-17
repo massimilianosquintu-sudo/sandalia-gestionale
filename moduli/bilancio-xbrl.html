@@ -1876,6 +1876,34 @@ html.stampa-pdf .solo-stampa.st-attiva{display:block!important;position:absolute
     if (!S.cur || cf(S.cur.cf) !== cf(l[0].cf)) apriDoc(l[0]);
     return true;
   };
+  /* dati anagrafici dalla scheda del cliente nel portale: CCIAA, REA, capitale sociale, socio unico, forma giuridica, sede.
+     Si applicano al bilancio aperto se è dello stesso soggetto; restituisce le voci cambiate */
+  const XB_LAB = { DatiAnagraficiDenominazione: "denominazione", DatiAnagraficiSede: "sede", DatiAnagraficiCapitaleSociale: "capitale sociale", DatiAnagraficiCapitaleSocialeInteramenteVersato: "capitale interamente versato", DatiAnagraficiCodiceCciaa: "codice CCIAA", DatiAnagraficiPartitaIva: "partita IVA", DatiAnagraficiCodiceFiscale: "codice fiscale", DatiAnagraficiNumeroRea: "numero REA", DatiAnagraficiFormaGiuridica: "forma giuridica", DatiAnagraficiSettoreAttivitaPrevalenteAteco: "ATECO", DatiAnagraficiSocietaLiquidazione: "società in liquidazione", DatiAnagraficiSocietaSocioUnico: "socio unico" };
+  window.portaleAnagrafica = function (d) {
+    if (!d || !S.cur) return [];
+    const f = S.cur.f || (S.cur.f = {}), mio = cf(S.cur.cf || f["DatiAnagraficiCodiceFiscale@0i"]);
+    if (mio && mio !== cf(d.cf) && mio !== cf(d.piva)) return [];
+    const m = { DatiAnagraficiDenominazione: d.den, DatiAnagraficiSede: d.sede, DatiAnagraficiCapitaleSociale: d.capitale, DatiAnagraficiCapitaleSocialeInteramenteVersato: d.versato, DatiAnagraficiCodiceCciaa: d.cciaa, DatiAnagraficiPartitaIva: d.piva, DatiAnagraficiCodiceFiscale: d.cf, DatiAnagraficiNumeroRea: d.rea, DatiAnagraficiFormaGiuridica: d.forma, DatiAnagraficiSettoreAttivitaPrevalenteAteco: d.ateco, DatiAnagraficiSocietaLiquidazione: d.liquidazione, DatiAnagraficiSocietaSocioUnico: d.socioUnico };
+    const cambi = [];
+    for (const [n, v] of Object.entries(m)) {
+      if (v === undefined || v === null || v === "" || (typeof v === "number" && !isFinite(v))) continue;
+      const k = n + "@0i"; if (f[k] === v) continue;
+      f[k] = v; cambi.push(XB_LAB[n] || n);
+    }
+    if (!S.cur.cf && d.cf) S.cur.cf = d.cf; if ((!S.cur.den || S.cur.den === "Nuova società") && d.den) S.cur.den = d.den;
+    if (cambi.length) { try { dopoModifica(); } catch (e) {} try { render(); } catch (e) {} }
+    return cambi;
+  };
+  /* all'apertura di un bilancio i dati anagrafici si allineano alla scheda del cliente */
+  const _apri = apriDoc;
+  apriDoc = function (doc) {
+    _apri(doc);
+    try {
+      const d = P.anagraficaXbrl && P.anagraficaXbrl(doc && (doc.cf || (doc.f && doc.f["DatiAnagraficiCodiceFiscale@0i"])) || (doc && doc.den && doc.den !== "Nuova società" ? "-" : ""));
+      const c = d ? window.portaleAnagrafica(d) : [];
+      if (c.length && P.toast) P.toast(`Bilancio XBRL: dati anagrafici aggiornati dalla scheda del cliente (${c.join(", ")}).`);
+    } catch (e) {}
+  };
 })();
 
 </script>
