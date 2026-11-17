@@ -185,6 +185,52 @@ pre.rec{font-family:var(--f-val);font-size:11.5px;background:var(--bg);border:1p
   <button type="button" class="sm" id="scEnd" title="Fine della pagina" aria-label="Fine della pagina">⤓</button>
 </div>
 <input type="file" id="fileJson" accept=".json,application/json" hidden>
+<input type="file" id="fileImpPortale" accept=".json,application/json" multiple hidden>
+<script>/* Importazione delle dichiarazioni esportate dalla Suite Dichiarazioni o dalle web app (schema sandalia.dichiarazioni/1) */
+(function(){
+  var APPK='irap', KEYS={sp:'rsp26-arch',sc:'rsc26-arch',enc:'rnc26-arch',irap:'irap26-arch',iva:'iva26-arch',lipe:'lipe26-arch'};
+  function ls(k){ try{ return JSON.parse(localStorage.getItem(k)||'null')||{}; }catch(e){ return {}; } }
+  function avvisa(t){ try{ if(typeof toast==='function') return toast(t); }catch(e){} alert(t); }
+  async function importa(files){
+    var recs={}, nomi=[];
+    for(var i=0;i<files.length;i++){
+      var f=files[i], A=null; try{ A=JSON.parse(await f.text()); }catch(e){ avvisa(f.name+' non è un file JSON.'); return; }
+      if(!A||A.schema!=='sandalia.dichiarazioni/1'||!A.archivi){ avvisa(f.name+': non è il file delle dichiarazioni esportato dalla Suite o dalle web app. Per una singola dichiarazione usa «Carica da file».'); return; }
+      var m=A.archivi[APPK]||{}; nomi.push(f.name);
+      Object.keys(m).forEach(function(id){ var r=m[id]; if(r&&r.cf&&r.json&&(!recs[id]||(r.updated||0)>(recs[id].updated||0))) recs[id]=r; });
+    }
+    var ids=Object.keys(recs); if(!ids.length){ avvisa('Nel file non ci sono dichiarazioni di questo modello.'); return; }
+    var db=null; try{ if(window.claude&&window.claude.use) db=await Promise.race([window.claude.use('db'),new Promise(function(r){setTimeout(function(){r(null)},4000)})]); }catch(e){}
+    var n=0, gia=0, loc=ls(KEYS[APPK]);
+    for(var j=0;j<ids.length;j++){
+      var id=ids[j], r=recs[id], rec={cf:String(r.cf).toUpperCase(),ragione:r.ragione||'',updated:Number(r.updated)||Date.now(),json:String(r.json)};
+      if(db){
+        var ref=db.collection('dichiarazioni').doc(id), ex=null;
+        try{ var g=await ref.get(); if(g.exists) ex=g.data(); }catch(e){}
+        if(ex&&(ex.updated||0)>=rec.updated){ gia++; continue; }
+        try{ await ref.set(rec); n++; continue; }catch(e){}
+      }
+      if(loc[id]&&(loc[id].updated||0)>=rec.updated){ gia++; continue; }
+      loc[id]=rec; n++;
+    }
+    try{ localStorage.setItem(KEYS[APPK],JSON.stringify(loc)); }catch(e){}
+    try{ if(typeof loadArchive==='function') await loadArchive(); }catch(e){}
+    try{ if(typeof go==='function') go('ARCH'); }catch(e){}
+    avvisa('Importate '+n+' dichiarazioni'+(gia?' ('+gia+' già presenti in una versione uguale o più recente)':'')+'.');
+  }
+  var inp=document.getElementById('fileImpPortale');
+  inp.addEventListener('change',function(){ var fs=[].slice.call(inp.files); inp.value=''; if(fs.length) importa(fs); });
+  function aggiungi(){
+    var ref=document.getElementById('bArch'); if(!ref||document.getElementById('bImpPortale')) return;
+    var b=ref.cloneNode(false); b.id='bImpPortale'; b.removeAttribute('aria-current'); b.textContent='Importa dichiarazioni'; b.title='Carica il file esportato dalla Suite Dichiarazioni («Esporta tutte le dichiarazioni») o dalle web app («Esporta per il Portale»)';
+    b.addEventListener('click',function(e){ e.preventDefault(); inp.click(); });
+    ref.parentNode.insertBefore(b, ref.nextSibling);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',aggiungi); else aggiungi();
+  setTimeout(aggiungi,1500);
+})();
+</script>
+
 <input type="file" id="fileXml" accept=".xml,.txt,.ira,application/xml,text/xml" hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
