@@ -4576,28 +4576,53 @@ $("#ban-esito").addEventListener("click", async e => {
 
 /* ---------------------------------------------------------------- PAGHE (schema di registrazione per azienda) */
 const PAG_TIPI = { M: "Mensilità", T: "Tredicesima", Q: "Quattordicesima", A: "Altra elaborazione" };
-const PAG_F24 = [["", "—"], ["1001", "1001 · ritenute lavoro dipendente"], ["1002", "1002 · ritenute su arretrati"], ["1004", "1004 · ritenute redditi assimilati"], ["1012", "1012 · ritenute su TFR"], ["1712", "1712 · imposta sost. TFR acconto"], ["1713", "1713 · imposta sost. TFR saldo"], ["3802", "3802 · addizionale regionale"], ["3847", "3847 · add. comunale acconto"], ["3848", "3848 · add. comunale saldo"], ["DM10", "DM10 · contributi INPS"]];
-const PAG_CAMPO = [["", "—"], ["lordo", "Retribuzioni lorde"], ["inpsDitta", "INPS a carico azienda"], ["inpsDip", "INPS a carico dipendenti"], ["inpsTot", "INPS totale"], ["irpef", "Ritenute IRPEF"], ["addReg", "Addizionale regionale"], ["addCom", "Addizionale comunale"], ["altre", "Altre trattenute"], ["netto", "Netto in busta"], ["tfr", "Quota TFR"], ["inail", "Premio INAIL"]];
+const PAG_F24 = [["", "—"], ["1001", "1001 · ritenute lavoro dipendente e assimilati"], ["1002", "1002 · ritenute su arretrati"], ["1004", "1004 · ritenute redditi assimilati"], ["1012", "1012 · ritenute su TFR"], ["1712", "1712 · imposta sost. TFR acconto"], ["1713", "1713 · imposta sost. TFR saldo"], ["3802", "3802 · addizionale regionale"], ["3847", "3847 · add. comunale acconto"], ["3848", "3848 · add. comunale saldo"], ["DM10", "DM10 · contributi INPS"], ["CXX", "CXX · INPS gestione separata"]];
+const PAG_CAMPO = [["", "—"], ["lordo", "Retribuzioni lorde dei dipendenti"], ["anticipiCE", "Anticipi malattia/infortunio c/Cassa Edile"], ["trattInt", "Trattamento integrativo e bonus anticipati"], ["inpsDitta", "INPS a carico azienda"], ["inpsDip", "INPS a carico dipendenti"], ["inpsTot", "INPS totale (azienda e dipendenti)"], ["creditiInps", "Crediti INPS a conguaglio (quadro D)"], ["irpef", "Ritenute IRPEF (dipendenti e amministratori)"], ["addReg", "Addizionale regionale"], ["addCom", "Addizionale comunale (saldo)"], ["addComAcc", "Addizionale comunale (acconto)"], ["ceDitta", "Cassa Edile a carico azienda"], ["ceDip", "Cassa Edile trattenuta ai dipendenti"], ["ceAcc", "Accantonamento Cassa Edile"], ["ceTot", "Debito verso la Cassa Edile"], ["altre", "Altre trattenute"], ["arrotAtt", "Arrotondamenti del mese (in busta)"], ["arrotPrec", "Arrotondamenti precedenti (recuperati)"], ["netto", "Netto in busta dei dipendenti"], ["lordoAmm", "Compensi lordi degli amministratori"], ["inpsAmmDitta", "INPS gestione separata a carico azienda"], ["inpsAmmColl", "INPS gestione separata a carico amministratore"], ["inpsAmmTot", "INPS gestione separata totale"], ["nettoAmm", "Netto degli amministratori"], ["tfr", "Quota TFR"], ["inail", "Premio INAIL"]];
+/* conto più usato nell'azienda tra quelli equivalenti (per esempio le retribuzioni importate da Blustring o Profis su un sottoconto diverso) */
+function pagConto(def, alt) {
+  const cand = [def, ...(alt || [])].filter(c => contoOk(c)); if (cand.length < 2) return cand[0] || def;
+  const n = new Map(cand.map(c => [c, 0]));
+  for (const r of S.regs || []) for (const x of r.righe || []) if (n.has(x.conto)) n.set(x.conto, n.get(x.conto) + 1);
+  return cand.reduce((m, c) => n.get(c) > n.get(m) ? c : m, cand[0]);
+}
 const PAG_STD = () => [
-  { id: "lordo", voce: "Retribuzioni lorde", conto: K2.retrib, lato: "D", f24: "", campo: "lordo" },
-  { id: "inpsd", voce: "Contributi INPS a carico dell'azienda", conto: K2.contrInps, lato: "D", f24: "", campo: "inpsDitta" },
+  { id: "lordo", voce: "Retribuzioni lorde dei dipendenti", conto: pagConto(K2.retrib, ["67.01.01.99"]), lato: "D", f24: "", campo: "lordo" },
+  { id: "antce", voce: "Anticipi malattia e infortunio per conto della Cassa Edile", conto: pagConto("37.01.99"), lato: "D", f24: "", campo: "anticipiCE" },
+  { id: "trint", voce: "Trattamento integrativo e bonus anticipati (credito 1701, a riduzione del 1001)", conto: K2.ritDip, lato: "D", f24: "1001", campo: "trattInt" },
+  { id: "inpsd", voce: "Contributi INPS a carico dell'azienda", conto: pagConto(K2.contrInps, ["67.01.03.99"]), lato: "D", f24: "", campo: "inpsDitta" },
   { id: "inps", voce: "Debiti verso INPS (azienda e dipendenti)", conto: K2.inps, lato: "A", f24: "DM10", campo: "inpsTot" },
-  { id: "irpef", voce: "Ritenute IRPEF", conto: K2.ritDip, lato: "A", f24: "1001", campo: "irpef" },
-  { id: "addr", voce: "Addizionale regionale trattenuta", conto: K2.addReg, lato: "A", f24: "3802", campo: "addReg" },
-  { id: "addc", voce: "Addizionale comunale trattenuta", conto: K2.addCom, lato: "A", f24: "3848", campo: "addCom" },
-  { id: "altre", voce: "Altre trattenute e arrotondamenti", conto: K2.arrot, lato: "A", f24: "", campo: "altre" },
+  { id: "inpscr", voce: "Crediti INPS a conguaglio nel DM10 (quadro D)", conto: K2.inps, lato: "D", f24: "DM10", campo: "creditiInps" },
+  { id: "inpsrec", voce: "Recupero sui contributi per i crediti INPS (verifica la natura)", conto: pagConto(K2.contrInps, ["67.01.03.99"]), lato: "A", f24: "", campo: "creditiInps" },
+  { id: "irpef", voce: "Ritenute IRPEF (dipendenti e amministratori)", conto: K2.ritDip, lato: "A", f24: "1001", campo: "irpef" },
+  { id: "addr", voce: "Addizionale regionale trattenuta", conto: pagConto(K2.addReg, [K2.ritDip]), lato: "A", f24: "3802", campo: "addReg" },
+  { id: "addc", voce: "Addizionale comunale trattenuta (saldo)", conto: pagConto(K2.addCom, [K2.ritDip]), lato: "A", f24: "3848", campo: "addCom" },
+  { id: "addca", voce: "Addizionale comunale trattenuta (acconto)", conto: pagConto(K2.addCom, [K2.ritDip]), lato: "A", f24: "3847", campo: "addComAcc" },
+  { id: "ced", voce: "Contributi Cassa Edile a carico dell'azienda", conto: pagConto("67.01.09.92", ["67.01.09.99"]), lato: "D", f24: "", campo: "ceDitta" },
+  { id: "cedeb", voce: "Debiti verso la Cassa Edile (contributi, trattenute e accantonamenti)", conto: pagConto("37.01.99"), lato: "A", f24: "", campo: "ceTot" },
+  { id: "altre", voce: "Altre trattenute", conto: K2.arrot, lato: "A", f24: "", campo: "altre" },
+  { id: "arra", voce: "Arrotondamenti del mese", conto: pagConto(K2.arrot, ["71.03.17"]), lato: "D", f24: "", campo: "arrotAtt" },
+  { id: "arrp", voce: "Arrotondamenti precedenti recuperati", conto: pagConto(K2.arrot, ["53.01.29"]), lato: "A", f24: "", campo: "arrotPrec" },
   { id: "netto", voce: "Netto da pagare ai dipendenti", conto: K.stipendi, lato: "A", f24: "", campo: "netto" },
+  { id: "amm", voce: "Compensi agli amministratori", conto: pagConto("61.05.01.99"), lato: "D", f24: "", campo: "lordoAmm" },
+  { id: "ammin", voce: "Contributi INPS gestione separata a carico dell'azienda", conto: pagConto("61.05.11.99"), lato: "D", f24: "", campo: "inpsAmmDitta" },
+  { id: "ammdeb", voce: "Debiti INPS gestione separata (azienda e amministratore)", conto: pagConto("37.01.03"), lato: "A", f24: "CXX", campo: "inpsAmmTot" },
+  { id: "ammnet", voce: "Netto da pagare agli amministratori", conto: pagConto("39.05.03"), lato: "A", f24: "", campo: "nettoAmm" },
   { id: "tfrc", voce: "Quota TFR del mese", conto: K2.quotaTfr, lato: "D", f24: "", campo: "tfr" },
   { id: "tfrf", voce: "Fondo TFR", conto: K2.tfrAz, lato: "A", f24: "", campo: "tfr" },
   { id: "inailc", voce: "Premi INAIL di competenza", conto: K2.premiInail, lato: "D", f24: "", campo: "inail" },
   { id: "inaild", voce: "Debiti verso INAIL", conto: K2.inail, lato: "A", f24: "", campo: "inail" }
 ];
+/* valori derivati dai dati letti */
+function pagValori(o) {
+  const n = k => Number(o[k]) || 0;
+  return { ...o, inpsTot: r2(n("inpsDitta") + n("inpsDip")), ceTot: r2(n("ceDitta") + n("ceDip") + n("ceAcc")), inpsAmmTot: r2(n("inpsAmmDitta") + n("inpsAmmColl")) };
+}
 const regPaghe = () => S.regs.filter(r => r.causale === "PAGHE" && r.paghe);
 const pagTipo = p => p.tipo || "M";
 /* registrazioni salvate prima dello schema per azienda: righe ricostruite dai totali */
 function pagheRighe(p) {
   if (Array.isArray(p.righe)) return p.righe;
-  const v = { ...p, inpsTot: r2((p.inpsDitta || 0) + (p.inpsDip || 0)) };
+  const v = pagValori(p);
   return PAG_STD().map(x => {
     const y = { ...x, imp: r2(v[x.campo] || 0) };
     if (x.id === "tfrc" && p.tfrDest === "tes") y.conto = K2.quotaTfrTes; if (x.id === "tfrc" && p.tfrDest === "comp") y.conto = K2.quotaTfrComp;
@@ -4738,20 +4763,41 @@ async function leggiRiepilogoPaghe(f) {
     const scansione = text.replace(/\s/g, "").length < 80;
     if (scansione && !S.imgLimits) { msg.textContent = "PDF scansionato: in questa vista l'agente non legge immagini."; return; }
     const libere = PAGW.righe.filter(x => !x.campo && String(x.voce || "").trim());
-    const prompt = `Sei l'addetto alla contabilità di uno studio commercialista italiano. Leggi il riepilogo delle paghe (prospetto contabile del consulente del lavoro o LUL) ${scansione ? "nelle immagini allegate" : "riportato sotto"} e restituisci i totali dell'azienda.
-Rispondi solo con un oggetto JSON: {"mese":1,"anno":2026,"elaborazione":"M","dipendenti":0,"lordo":0,"inpsDitta":0,"inpsDip":0,"irpef":0,"addReg":0,"addCom":0,"altre":0,"netto":0,"tfr":0,"inail":0,"voci":{}}
-Regole: importi in euro con il punto decimale; "elaborazione" è M per la mensilità ordinaria, T per la tredicesima, Q per la quattordicesima, A per altre elaborazioni o conguagli; "lordo" sono le retribuzioni lorde (imponibile previdenziale più voci non imponibili); "inpsDitta" e "inpsDip" i contributi INPS a carico dell'azienda e dei dipendenti; "irpef" le ritenute IRPEF al netto del conguaglio; "addReg" e "addCom" le addizionali regionale e comunale trattenute; "altre" eventuali altre trattenute o arrotondamenti non indicati in "voci"; "netto" il netto in busta; "tfr" la quota TFR maturata; "inail" il premio INAIL di competenza se indicato, altrimenti 0.${libere.length ? `\nIn "voci" restituisci l'importo di ciascuna di queste voci aggiuntive dello schema dell'azienda, usando come chiave l'identificativo (0 se non presente): ${libere.map(x => `"${x.id}" = ${x.voce}`).join("; ")}. Gli importi riportati in "voci" non vanno ripetuti in "altre".` : ""}
+    const prompt = `Sei l'addetto alla contabilità di uno studio commercialista italiano. Leggi il riepilogo delle paghe del mese (nota contabile o prospetto contabile del consulente del lavoro, oppure LUL) ${scansione ? "nelle immagini allegate" : "riportato sotto"} e restituisci i totali dell'azienda.
+Rispondi solo con un oggetto JSON: {"mese":1,"anno":2026,"elaborazione":"M","dipendenti":0,"lordo":0,"anticipiCE":0,"trattInt":0,"inpsDitta":0,"inpsDip":0,"creditiInps":0,"irpef":0,"addReg":0,"addCom":0,"addComAcc":0,"ceDitta":0,"ceDip":0,"ceAcc":0,"altre":0,"arrotAtt":0,"arrotPrec":0,"netto":0,"lordoAmm":0,"inpsAmmDitta":0,"inpsAmmColl":0,"nettoAmm":0,"tfr":0,"inail":0,"voci":{}}
+Il documento può avere più sezioni (per esempio una per i dipendenti e una per l'amministratore o i collaboratori, riconoscibile da "AMMINISTRATORE", "CO.CO.CO." o "ASS.PART."): tieni separati dipendenti e amministratori come indicato sotto e somma le sezioni dello stesso tipo.
+Dipendenti:
+- "lordo": TOTALE RETRIBUZIONI LORDE dei dipendenti;
+- "anticipiCE": anticipi di malattia o infortunio per conto della Cassa Edile (ANTICIPI MAL./INF. C/CAS.EDILE), pagati in busta;
+- "trattInt": trattamento integrativo, bonus o crediti L. 207/2024 pagati in busta (Tratt.Integr.-Bonus…), da recuperare in F24;
+- "inpsDitta": contributi INPS a carico dell'azienda (DI CUI A CARICO AZIENDA LORDO); "inpsDip": ritenute previdenziali INPS a carico dei dipendenti (Ritenute previd. FAP o INPS), esclusa la Cassa Edile;
+- "creditiInps": crediti a conguaglio nel DM10 (Varie credito Quadro D, assegni, indennità anticipate per conto dell'INPS), senza l'arrotondamento del versamento;
+- "ceDitta": contributi Cassa Edile a carico della ditta (Contributi cassa edile C/DITTA); "ceDip": ritenute Cassa Edile trattenute ai dipendenti (Ritenute previd. cassa edile); "ceAcc": accantonamento Cassa Edile trattenuto in busta;
+- "arrotAtt": arrotondamenti attuali (aggiunti al netto) di tutte le sezioni; "arrotPrec": arrotondamenti precedenti (trattenuti) di tutte le sezioni;
+- "netto": TOTALE NETTO IN BUSTA dei soli dipendenti;
+- "altre": altre trattenute non comprese nelle voci precedenti (sindacati, cessioni, pignoramenti);
+Amministratori e collaboratori:
+- "lordoAmm": TOTALE RETRIBUZIONI LORDE degli amministratori; "inpsAmmDitta": contributi gestione separata a carico della ditta (COCOCO/ASS.PART. C/DITTA); "inpsAmmColl": contributi gestione separata a carico dell'amministratore (C/collab.re o Ritenute CO.CO.CO.); "nettoAmm": netto degli amministratori;
+Per tutti:
+- "irpef": ritenute IRPEF (codice 1001) di dipendenti e amministratori insieme, al netto del conguaglio; "addReg": addizionale regionale; "addCom": addizionale comunale a saldo; "addComAcc": acconto dell'addizionale comunale;
+- "tfr": quota TFR maturata se indicata; "inail": premio INAIL di competenza se indicato.
+"elaborazione" è M per la mensilità ordinaria, T per la tredicesima, Q per la quattordicesima, A per altre elaborazioni o conguagli; "dipendenti" è il numero dei dipendenti, esclusi gli amministratori. Importi in euro con il punto decimale, sempre positivi.${libere.length ? `\nIn "voci" restituisci l'importo di ciascuna di queste voci aggiuntive dello schema dell'azienda, usando come chiave l'identificativo (0 se non presente): ${libere.map(x => `"${x.id}" = ${x.voce}`).join("; ")}. Gli importi riportati in "voci" non vanno ripetuti negli altri campi.` : ""}
 Non inventare: metti 0 ciò che non trovi.${scansione ? "" : `\n\nTesto del documento:\n${text.slice(0, 60000)}`}`;
     const o = await chiediJson(f.name, prompt, scansione ? await immaginiPdf(pdf, Math.min(S.imgLimits.maxCount, 4)) : null);
     if (!o || typeof o !== "object") { msg.textContent = "L'agente non ha restituito i dati: inseriscili a mano."; return; }
     if (o.mese >= 1 && o.mese <= 12) $("#pag-mese").value = String(o.mese);
     if (PAG_TIPI[o.elaborazione]) $("#pag-tipo").value = o.elaborazione;
     const reg = pagRegCorrente(); pagCarica();
-    const v = { ...o, inpsTot: r2((Number(o.inpsDitta) || 0) + (Number(o.inpsDip) || 0)) }, voci = o.voci && typeof o.voci === "object" ? o.voci : {};
+    const v = pagValori(o), voci = o.voci && typeof o.voci === "object" ? o.voci : {};
+    // dati letti che lo schema dell'azienda non prevede: si aggiungono le righe dello schema standard che li registrano
+    const aggiunte = [];
+    for (const std of PAG_STD()) if (std.campo && Math.abs(Number(v[std.campo]) || 0) >= 0.005 && !PAGW.righe.some(x => x.campo === std.campo && x.lato === std.lato)) { PAGW.righe.push({ ...std, imp: 0 }); aggiunte.push(std.voce); }
     for (const x of PAGW.righe) x.imp = x.campo ? r2(Number(v[x.campo]) || 0) : r2(Number(voci[x.id]) || 0);
+    // schema standard (non personalizzato dall'azienda): restano solo le righe con un importo
+    if (!aziendaCorrente()?.schemaPaghe && PAGW.righe.some(x => x.imp)) PAGW.righe = PAGW.righe.filter(x => x.imp);
     $("#pag-n").value = Number(o.dipendenti) || "";
     pagDisegna();
-    msg.textContent = `Riepilogo di ${MESI[Number($("#pag-mese").value) - 1].toLowerCase()} (${PAG_TIPI[$("#pag-tipo").value].toLowerCase()}) letto dall'agente: confronta gli importi con il documento e registra.${reg ? " Esiste già una registrazione per questo mese: registrando la aggiorni." : ""}${o.anno && Number(o.anno) !== S.anno ? ` Attenzione: il documento è del ${o.anno}.` : ""}`;
+    msg.textContent = `Riepilogo di ${MESI[Number($("#pag-mese").value) - 1].toLowerCase()} (${PAG_TIPI[$("#pag-tipo").value].toLowerCase()}) letto dall'agente: confronta gli importi con il documento e registra.${aggiunte.length ? ` Aggiunte allo schema del mese le righe: ${aggiunte.join("; ")} (salva lo schema per ritrovarle).` : ""}${reg ? " Esiste già una registrazione per questo mese: registrando la aggiorni." : ""}${o.anno && Number(o.anno) !== S.anno ? ` Attenzione: il documento è del ${o.anno}.` : ""}`;
   } catch (e) { msg.textContent = "Lettura non riuscita: " + (e.message || e); }
 }
 $("#drop-pag").addEventListener("click", () => $("#in-pag").click());
@@ -4795,7 +4841,7 @@ function vociF24() {
     const k = `${r.paghe.mese}|${x.f24}|${x.conto}`, g = pg.get(k) || { m: r.paghe.mese, cod: x.f24, conto: x.conto, imp: 0 };
     g.imp = r2(g.imp - pagSegno(x)); pg.set(k, g);
   }
-  const DESC_F24 = { "1001": "Ritenute su retribuzioni", "1002": "Ritenute su emolumenti arretrati", "1004": "Ritenute su redditi assimilati", "1012": "Ritenute su TFR e indennità di fine rapporto", "1712": "Imposta sostitutiva sulla rivalutazione del TFR · acconto", "1713": "Imposta sostitutiva sulla rivalutazione del TFR · saldo", "3802": "Addizionale regionale trattenuta", "3847": "Addizionale comunale trattenuta · acconto", "3848": "Addizionale comunale trattenuta", "DM10": "Contributi INPS dipendenti" };
+  const DESC_F24 = { "1001": "Ritenute su retribuzioni", "1002": "Ritenute su emolumenti arretrati", "1004": "Ritenute su redditi assimilati", "1012": "Ritenute su TFR e indennità di fine rapporto", "1712": "Imposta sostitutiva sulla rivalutazione del TFR · acconto", "1713": "Imposta sostitutiva sulla rivalutazione del TFR · saldo", "3802": "Addizionale regionale trattenuta", "3847": "Addizionale comunale trattenuta · acconto", "3848": "Addizionale comunale trattenuta", "DM10": "Contributi INPS dipendenti", "CXX": "Contributi INPS gestione separata" };
   const visti = new Set();
   for (const g of [...pg.values()].sort((a, b) => a.m - b.m)) {
     if (!(g.imp > 0.004)) continue;
@@ -4803,6 +4849,7 @@ function vociF24() {
     const key = visti.has(b) ? `${b}|${g.conto}` : b; visti.add(b);
     const desc = `${DESC_F24[g.cod] || "Tributo " + g.cod} ${g.cod === "DM10" ? "di" : "·"} ${MESI[m - 1].toLowerCase()}`;
     if (g.cod === "DM10") add({ key, sez: "inps", caus: "DM10", cod: "DM10", sede: imp.sede || "", matr: imp.matricola || "", da: `${mm}/${Y}`, a: `${mm}/${Y}`, rat: "", anno: String(Y), imp: g.imp, conto: g.conto, scad, desc, completa: !imp.matricola || !imp.sede ? "matricola e sede INPS" : "" });
+    else if (g.cod === "CXX") add({ key, sez: "inps", caus: "CXX", cod: "CXX", sede: imp.sede || "", matr: az.cf || az.piva || "", da: `${mm}/${Y}`, a: `${mm}/${Y}`, rat: "", anno: String(Y), imp: g.imp, conto: g.conto, scad, desc, completa: !imp.sede ? "sede INPS" : "" });
     else if (g.cod === "3802") add({ key, sez: "regioni", reg: imp.regione || "", cod: "3802", rat: "", anno: String(Y), imp: g.imp, conto: g.conto, scad, desc, completa: !imp.regione ? "codice regione" : "" });
     else if (g.cod === "3847" || g.cod === "3848") add({ key, sez: "imu", ente: imp.comune || "", cod: g.cod, rat: "", anno: String(Y), imp: g.imp, conto: g.conto, scad, desc, completa: !imp.comune ? "codice del comune" : "" });
     else add({ key, sez: "erario", cod: g.cod, rat: "", anno: String(Y), imp: g.imp, conto: g.conto, scad, desc });
