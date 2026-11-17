@@ -278,8 +278,8 @@ legend{font-weight:700;font-size:14px;padding:0 6px}
         <div><h1>Clienti</h1><p>L’anagrafica unica dello Studio. Ciò che inserisci qui passa alla Contabilità Ordinaria e Forfettaria e precompila i frontespizi di Redditi, IRAP, IVA e LIPE.</p></div>
         <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button type="button" class="btn" id="arch-esporta" title="Clienti, dati dello Studio e contabilità in un file JSON">Esporta archivio</button>
-          <button type="button" class="btn" id="arch-importa" title="Carica un archivio esportato dal Portale pubblicato o dal file sul computer">Importa archivio</button>
-          <input type="file" id="arch-file" accept=".json,application/json" hidden>
+          <button type="button" class="btn" id="arch-importa" title="Carica un archivio esportato dal Portale oppure il file delle dichiarazioni esportato dalla Suite Dichiarazioni o dalle web app">Importa archivio</button>
+          <input type="file" id="arch-file" accept=".json,application/json" multiple hidden>
           <button type="button" class="btn pri" id="cl-nuovo">Nuovo cliente</button>
         </div>
       </div>
@@ -1744,19 +1744,94 @@ $('#arch-importa').addEventListener('click', () => {
   $('#arch-file').click();
 });
 $('#arch-file').addEventListener('change', async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const fs = [...e.target.files]; e.target.value = ''; if (!fs.length) return;
   const msg = $('#arch-msg');
   try {
-    const A = JSON.parse(await f.text());
-    if (!A || A.schema !== 'sandalia.archivio/1') throw new Error('non è un archivio esportato dal Portale');
-    const n = contaArchivio(A); ARCH_PEND = A;
+    const arch = [], dich = [];
+    for (const f of fs) {
+      let A; try { A = JSON.parse(await f.text()); } catch (er) { throw new Error(`${f.name} non è un file JSON`); }
+      if (A && A.schema === 'sandalia.archivio/1') arch.push([f, A]);
+      else if (A && A.schema === 'sandalia.dichiarazioni/1' && A.archivi) dich.push([f, A]);
+      else throw new Error(`${f.name} non è un archivio del Portale né il file delle dichiarazioni esportato dalla Suite Dichiarazioni`);
+    }
+    if (arch.length && (arch.length > 1 || dich.length)) throw new Error('carica un archivio del Portale alla volta, da solo');
+    if (arch.length) {
+      const [f, A] = arch[0], n = contaArchivio(A); ARCH_PEND = A;
+      $('#arch-importa').textContent = 'Conferma l’importazione';
+      msg.className = 'msg'; msg.textContent = `${f.name}: ${n.clienti} clienti, ${n.ord + n.semp} aziende in contabilità, ${n.forf} forfettari, ${n.reg} registrazioni, ${n.bil} bilanci XBRL (${A.origine || ''}, esportato il ${new Date(A.esportato).toLocaleString('it-IT')}). I dati con lo stesso identificativo vengono sostituiti, gli altri restano. Premi «Conferma l’importazione».`;
+      setTimeout(() => { if (ARCH_PEND === A) { ARCH_PEND = null; $('#arch-importa').textContent = 'Importa archivio'; } }, 30000);
+      return;
+    }
+    // file delle dichiarazioni (Suite Dichiarazioni o web app): si uniscono, a parità di dichiarazione vale la più recente
+    const D = { schema: 'sandalia.dichiarazioni/1', archivi: {} }, tPf = x => Date.parse(x && (x.salvata || x.creata) || '') || 0;
+    for (const [, A] of dich) for (const [k, m] of Object.entries(A.archivi || {})) {
+      const T = D.archivi[k] = D.archivi[k] || {};
+      if (k === 'f24') { for (const [cf, c] of Object.entries(m || {})) { const x = T[cf] = T[cf] || { ...c, items: {} }; Object.assign(x.items, (c && c.items) || {}); } continue; }
+      for (const [id, r] of Object.entries(m || {})) { const t = k === 'pf' ? tPf : (y => (y && y.updated) || 0); if (!T[id] || t(r) > t(T[id])) T[id] = r; }
+    }
+    const n = dichConta(D); if (!n.tot) throw new Error('nel file non ci sono dichiarazioni');
+    const P = { tipo: 'dich', D }; ARCH_PEND = P;
     $('#arch-importa').textContent = 'Conferma l’importazione';
-    msg.className = 'msg'; msg.textContent = `${f.name}: ${n.clienti} clienti, ${n.ord + n.semp} aziende in contabilità, ${n.forf} forfettari, ${n.reg} registrazioni, ${n.bil} bilanci XBRL (${A.origine || ''}, esportato il ${new Date(A.esportato).toLocaleString('it-IT')}). I dati con lo stesso identificativo vengono sostituiti, gli altri restano. Premi «Conferma l’importazione».`;
-    setTimeout(() => { if (ARCH_PEND === A) { ARCH_PEND = null; $('#arch-importa').textContent = 'Importa archivio'; } }, 30000);
+    msg.className = 'msg'; msg.textContent = `${fs.map(f => f.name).join(', ')}: ${n.testo}. Ogni dichiarazione entra nell’archivio del suo modello; se nel Portale c’è già la stessa dichiarazione, resta la versione salvata più di recente. Premi «Conferma l’importazione» entro 30 secondi.`;
+    setTimeout(() => { if (ARCH_PEND === P) { ARCH_PEND = null; $('#arch-importa').textContent = 'Importa archivio'; } }, 30000);
   } catch (er) { msg.className = 'msg err'; msg.textContent = 'File non valido: ' + (er.message || er); }
 });
+const DICH_KEYS = { sp: 'rsp26-arch', sc: 'rsc26-arch', enc: 'rnc26-arch', irap: 'irap26-arch', iva: 'iva26-arch', lipe: 'lipe26-arch' };
+const DICH_NOMI = { pf: 'Redditi PF', sp: 'Redditi SP', sc: 'Redditi SC', enc: 'Redditi ENC', irap: 'IRAP', iva: 'IVA', lipe: 'LIPE' };
+function dichConta(D) {
+  const parti = []; let tot = 0;
+  for (const k of Object.keys(DICH_NOMI)) { const x = Object.keys(D.archivi[k] || {}).length; if (x) { parti.push(`${DICH_NOMI[k]} ${x}`); tot += x; } }
+  let nf = 0; for (const c of Object.values(D.archivi.f24 || {})) nf += Object.keys((c && c.items) || {}).length;
+  if (nf) { parti.push(`deleghe F24 ${nf}`); tot += nf; }
+  return { tot, testo: parti.join(', ') };
+}
+async function scriviDichiarazioni(D, prog) {
+  let n = 0, saltate = 0;
+  for (const [k, key] of Object.entries(DICH_KEYS)) {
+    for (const [id, r] of Object.entries(D.archivi[k] || {})) {
+      if (!r || !r.cf || !r.json) continue;
+      const rec = { cf: up(r.cf), ragione: r.ragione || '', updated: Number(r.updated) || Date.now(), json: String(r.json) };
+      if (DBNS) {
+        const ref = DBNS.collection(k + '_dichiarazioni').doc(idSicuro(id));
+        let ex = null; try { const g = await ref.get(); if (g.exists) ex = g.data(); } catch (e) {}
+        if (ex && (ex.updated || 0) >= rec.updated) { saltate++; continue; }
+        await dbRiprova(() => ref.set(dbPulito(rec)));
+      } else {
+        const loc = ls(key) || {}; if (loc[id] && (loc[id].updated || 0) >= rec.updated) { saltate++; continue; }
+        loc[id] = rec; if (!lsSet(key, loc)) throw new Error('spazio del browser esaurito');
+      }
+      prog(++n);
+    }
+  }
+  // Redditi PF e Modello F24: archivi del browser, che la sincronia porta nell'archivio condiviso
+  const pf = D.archivi.pf || {};
+  if (Object.keys(pf).length) {
+    const loc = ls('rpf26_archivio') || {}, t = x => Date.parse(x && (x.salvata || x.creata) || '') || 0;
+    for (const [id, d] of Object.entries(pf)) { if (!d || d.esempio || d.example) continue; if (loc[id] && t(loc[id]) >= t(d)) { saltate++; continue; } loc[id] = d; prog(++n); }
+    if (!lsSet('rpf26_archivio', loc)) throw new Error('spazio del browser esaurito');
+  }
+  const F = D.archivi.f24 || {};
+  if (Object.keys(F).length) {
+    const loc = ls('f24-archivio-v1') || {};
+    for (const [cf, c] of Object.entries(F)) {
+      const x = loc[cf] = loc[cf] || { ...c, items: {} }; x.items = x.items || {};
+      for (const [id, it] of Object.entries((c && c.items) || {})) { if (x.items[id]) { saltate++; continue; } x.items[id] = it; prog(++n); }
+    }
+    if (!lsSet('f24-archivio-v1', loc)) throw new Error('spazio del browser esaurito');
+  }
+  return { n, saltate };
+}
 async function confermaImport() {
   const A = ARCH_PEND, msg = $('#arch-msg'), b = $('#arch-importa'); ARCH_PEND = null; b.textContent = 'Importa archivio'; b.disabled = true;
+  if (A && A.tipo === 'dich') {
+    try {
+      const r = await scriviDichiarazioni(A.D, n => { msg.className = 'msg'; msg.textContent = `Importazione: ${n} dichiarazioni…`; });
+      MD = null;
+      msg.className = 'msg ok'; msg.textContent = `Importate ${r.n} dichiarazioni e deleghe${r.saltate ? `; ${r.saltate} erano già nel Portale in una versione uguale o più recente e non sono state toccate` : ''}. La pagina si ricarica per aggiornare gli archivi dei moduli.`;
+      setTimeout(() => location.reload(), 2500);
+    } catch (e) { msg.className = 'msg err'; msg.textContent = `Importazione interrotta${e && e.code ? ' (codice ' + e.code + ')' : e && e.message ? ' (' + e.message + ')' : ''}: le dichiarazioni già scritte restano, puoi ripetere l’importazione.`; }
+    b.disabled = false; return;
+  }
   try {
     await scriviArchivio(A, (n, t) => { msg.className = 'msg'; msg.textContent = `Importazione: ${n} di ${t}…`; });
     MD = null; if (!DBNS) cliLocale();
