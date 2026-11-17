@@ -1752,6 +1752,83 @@ window.PORTALE = {
   }
 };
 
+
+/* ======================= FRECCE DI SCORRIMENTO (inizio, pagina su, pagina giù, fine) =======================
+   Come nelle web app delle dichiarazioni: nelle pagine del portale e nei moduli che non le hanno già */
+(function () {
+  const CSS = `.sn-portale{position:fixed;right:max(14px,env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;flex-direction:column;gap:6px}
+.sn-portale[hidden]{display:none!important}
+.sn-portale button{width:42px;height:42px;border-radius:50%;border:1px solid var(--line,#d2dbdb);background:var(--panel,#fbfcfb);color:var(--acc,#0f5e6e);font-size:17px;line-height:1;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;padding:0;font-family:system-ui,sans-serif}
+.sn-portale button.sm{width:34px;height:34px;font-size:14px;align-self:center}
+.sn-portale button:hover:not([disabled]){filter:brightness(.95)}
+.sn-portale button:focus-visible{outline:2px solid var(--acc,#0f5e6e);outline-offset:2px}
+.sn-portale button[disabled]{opacity:.35;cursor:default;box-shadow:none}
+@media (prefers-color-scheme: dark){.sn-portale button{background:var(--panel,#162227);color:var(--acc,#6cc3d3);border-color:var(--line,#2a3a40)}}
+@media print{.sn-portale{display:none!important}}`;
+  function crea(doc, bersaglio) {
+    if (!doc || !doc.body || doc.getElementById('snPortale')) return;
+    const st = doc.createElement('style'); st.textContent = CSS; doc.head.appendChild(st);
+    const box = doc.createElement('div'); box.className = 'sn-portale no-print'; box.id = 'snPortale'; box.hidden = true;
+    box.innerHTML = '<button type="button" class="sm" data-snp="top" title="Inizio della pagina" aria-label="Inizio della pagina">⤒</button>' +
+      '<button type="button" data-snp="up" title="Pagina su" aria-label="Pagina su">▲</button>' +
+      '<button type="button" data-snp="down" title="Pagina giù" aria-label="Pagina giù">▼</button>' +
+      '<button type="button" class="sm" data-snp="end" title="Fine della pagina" aria-label="Fine della pagina">⤓</button>';
+    doc.body.appendChild(box);
+    const win = doc.defaultView;
+    const liscio = () => { try { return win.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'; } catch (e) { return 'auto'; } };
+    const aggiorna = () => {
+      const el = bersaglio(); if (!el) { box.hidden = true; return; }
+      const max = el.scrollHeight - el.clientHeight; box.hidden = max < 40;
+      if (box.hidden) return;
+      const y = el.scrollTop;
+      box.querySelector('[data-snp="top"]').disabled = box.querySelector('[data-snp="up"]').disabled = y <= 2;
+      box.querySelector('[data-snp="down"]').disabled = box.querySelector('[data-snp="end"]').disabled = y >= max - 2;
+    };
+    box.addEventListener('click', e => {
+      const b = e.target.closest('[data-snp]'); if (!b) return;
+      const el = bersaglio(); if (!el) return;
+      const pag = Math.max(120, el.clientHeight * 0.85), max = el.scrollHeight - el.clientHeight;
+      const y = { top: 0, up: el.scrollTop - pag, down: el.scrollTop + pag, end: max }[b.dataset.snp];
+      el.scrollTo({ top: Math.max(0, Math.min(max, y)), behavior: liscio() });
+      setTimeout(aggiorna, 450);
+    });
+    doc.addEventListener('scroll', aggiorna, true);
+    win.addEventListener('resize', aggiorna);
+    setInterval(aggiorna, 1200); aggiorna();
+  }
+  /* elemento che scorre: quello che l'utente ha fatto scorrere per ultimo, altrimenti il più grande tra quelli scorrevoli */
+  function bersaglioDi(doc) {
+    let ultimo = null;
+    doc.addEventListener('scroll', e => { const t = e.target === doc ? doc.scrollingElement : e.target; if (t && t.nodeType === 1 && t.scrollHeight - t.clientHeight > 40) ultimo = t; }, true);
+    const visibile = el => { if (!el.isConnected) return false; if (el === doc.scrollingElement) return true; const r = el.getBoundingClientRect(); return r.width > 200 && r.height > 150 && el.offsetParent !== null; };
+    return () => {
+      if (ultimo && visibile(ultimo) && ultimo.scrollHeight - ultimo.clientHeight > 40) return ultimo;
+      let best = null, area = 0;
+      const se = doc.scrollingElement; if (se && se.scrollHeight - se.clientHeight > 40) { best = se; area = se.clientWidth * se.clientHeight * 0.9; }
+      for (const el of doc.querySelectorAll('main, section, article, div, form, aside')) {
+        if (el.scrollHeight - el.clientHeight < 40) continue;
+        const oy = doc.defaultView.getComputedStyle(el).overflowY; if (oy !== 'auto' && oy !== 'scroll') continue;
+        if (!visibile(el)) continue;
+        const a = el.clientWidth * el.clientHeight; if (a > area) { area = a; best = el; }
+      }
+      return best;
+    };
+  }
+  /* pagine del portale (Scrivania, Clienti…): la pagina visibile; nascoste quando è aperto un modulo */
+  crea(document, () => { const pg = document.querySelector('section.page:not([hidden])'); return pg && pg.offsetParent !== null ? pg : null; });
+  /* moduli: si aggiungono dove mancano (le dichiarazioni e il Modello F24 hanno già le loro) */
+  function moduli() {
+    for (const k in frames) {
+      const f = frames[k]; if (!f || !f.el) continue;
+      let d = null; try { d = f.el.contentDocument; } catch (e) { d = null; }
+      if (!d || !d.body || d.readyState !== 'complete' || d.URL !== 'about:srcdoc' || d.getElementById('snPortale') || d.querySelector('.sn-box,[data-sn]')) continue;
+      const vecchie = d.querySelector('.scroller'); if (vecchie) vecchie.style.display = 'none';
+      crea(d, bersaglioDi(d));
+    }
+  }
+  setInterval(moduli, 1500);
+})();
+
 /* ======================= AVVIO ======================= */
 renderNav();
 $('#ver').textContent = 'v1.0';
