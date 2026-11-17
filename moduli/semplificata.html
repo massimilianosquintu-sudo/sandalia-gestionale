@@ -2664,7 +2664,7 @@ function creditoIvaResiduo(data) {
 function liquidazioni() {
   const az = aziendaCorrente(); if (!az) return [];
   const Y = String(S.anno), conf = (az.iva || {})[Y] || {}, man = LIQ_OVR ? { ...(conf.liqPre || {}), [LIQ_OVR.p]: LIQ_OVR.M } : (conf.liqPre || {});
-  let credAnnoRes = r2(conf.credPrec || creditoIvaApertura(az)), debRip = 0, credRip = 0, primo = true, ultimoManuale = false;
+  let credAnnoRes = r2(conf.credPrec || creditoIvaApertura(az)), debRip = 0, credRip = 0, primo = true, ultimoManuale = false, usatoPre = 0, nMan = 0;
   const rip = az.ripresa && az.ripresa.tipo === "corso" && az.ripresa.anno === S.anno ? az.ripresa : null;
   // credito ancora disponibile dopo i periodi liquidati nel programma precedente: dal saldo dei conti alla data della ripresa
   const residuoRip = rip && !conf.credPrec ? creditoIvaResiduo(rip.data) : null;
@@ -2676,8 +2676,13 @@ function liquidazioni() {
         M = man[p] || null;
         // periodo liquidato nel programma precedente e non inserito: non se ne conoscono gli importi
         if (!M) { debRip = 0; credRip = 0; ultimoManuale = false; return { p, pre: true, vp2: 0, vp3: 0, vp4: 0, vp5: 0, vp6: 0, vp7: 0, vp8: 0, vp9: 0, vp12: 0, vp13: 0, vp14: 0, versare: 0, credito: 0, cod: "", scad: "", riporto: 0 }; }
-        ultimoManuale = true;
-      } else if (primo) { if (!ultimoManuale) { credRip = r2(rip.credIva || 0); debRip = 0; } if (residuoRip != null) credAnnoRes = residuoRip; primo = false; }
+        ultimoManuale = true; nMan++;
+      } else if (primo) {
+        if (!ultimoManuale) { credRip = r2(rip.credIva || 0); debRip = 0; }
+        // periodi del programma precedente non inseriti: il credito ancora da usare è il saldo dei conti alla data della ripresa
+        if (residuoRip != null && !nMan) credAnnoRes = residuoRip;
+        primo = false;
+      }
     }
     let vp2 = 0, vp3 = 0, vp4 = 0, vp5 = 0;
     if (M) { vp2 = Number(M.vp2) || 0; vp3 = Number(M.vp3) || 0; vp4 = Number(M.vp4) || 0; vp5 = Number(M.vp5) || 0; }
@@ -2693,8 +2698,10 @@ function liquidazioni() {
     const vp6 = r2(vp4 - vp5), vp7 = debRip, vp8 = credRip;
     let dovuta = r2(vp6 + vp7 - vp8);
     let vp9 = 0;
-    if (M && M.vp9 != null && M.vp9 !== "") { vp9 = r2(Math.max(0, Math.min(Number(M.vp9) || 0, Math.max(dovuta, 0)))); credAnnoRes = r2(Math.max(0, credAnnoRes - vp9)); dovuta = r2(dovuta - vp9); }
-    else if (dovuta > 0 && credAnnoRes > 0) { vp9 = Math.min(dovuta, credAnnoRes); credAnnoRes = r2(credAnnoRes - vp9); dovuta = r2(dovuta - vp9); }
+    // credito dell'anno precedente: tutto nella prima liquidazione dell'anno (VP9), anche se il periodo chiude a credito;
+    // la parte non assorbita prosegue come credito del periodo precedente (VP8)
+    if (M && M.vp9 != null && M.vp9 !== "") { vp9 = r2(Math.max(0, Number(M.vp9) || 0)); credAnnoRes = r2(Math.max(0, credAnnoRes - vp9)); usatoPre = r2(usatoPre + vp9); dovuta = r2(dovuta - vp9); }
+    else if (credAnnoRes > 0) { vp9 = credAnnoRes; credAnnoRes = 0; if (M) usatoPre = r2(usatoPre + vp9); dovuta = r2(dovuta - vp9); }
     const ultimo = p === periodi(az).length;
     const vp13 = ultimo ? r2(conf.acconto || 0) : 0, metodo = ultimo && vp13 ? String(conf.metodo || "") : "";
     const vp12 = az.periodicita === "T" && dovuta > 0 ? r2(dovuta * 0.01) : 0;
