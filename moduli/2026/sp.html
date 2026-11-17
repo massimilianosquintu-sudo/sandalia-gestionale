@@ -790,7 +790,7 @@ const docId=()=>String(S.B.B2||'').toUpperCase().replace(/[^A-Z0-9]/g,'')+'_2026
 async function saveArchive(){
   if(!filledV(S.B.B2)){ toast('Indica il codice fiscale della società prima di salvare.'); go('FR'); return; }
   const rec={cf:String(S.B.B2).toUpperCase(),ragione:S.B.B27||'',updated:Date.now(),json:JSON.stringify(Object.assign({},S,{example:false}))};
-  if(DB){ try{ await DB.collection('dichiarazioni').doc(docId()).set(rec); toast('Dichiarazione salvata in archivio.'); return; }catch(e){ toast('Archivio non raggiungibile: salvata solo su questo dispositivo.'); } }
+  if(DB){ try{ await DB.collection('dichiarazioni').doc(docId()).set(rec); toast('Dichiarazione salvata in archivio.'); loadArchive(); return; }catch(e){ toast('Archivio non raggiungibile: salvata solo su questo dispositivo.'); } }
   try{ const loc=JSON.parse(localStorage.getItem('rsp26-arch')||'{}'); loc[docId()]=rec; localStorage.setItem('rsp26-arch',JSON.stringify(loc)); if(!DB) toast('Salvata su questo dispositivo.'); }catch(e){ toast('Salvataggio non riuscito.'); }
   loadArchive();
 }
