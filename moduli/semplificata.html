@@ -2668,11 +2668,16 @@ function liquidazioni() {
   const rip = az.ripresa && az.ripresa.tipo === "corso" && az.ripresa.anno === S.anno ? az.ripresa : null;
   // credito ancora disponibile dopo i periodi liquidati nel programma precedente: dal saldo dei conti alla data della ripresa
   const residuoRip = rip && !conf.credPrec ? creditoIvaResiduo(rip.data) : null;
+  // periodi del programma precedente con i registri IVA importati (registri di Blustring, registri IVA di Profis):
+  // la liquidazione si ricava dai registri come per i periodi successivi, salvo importi inseriti a mano
+  const idsRegBlu = new Set((az.importRegBlu || []).map(x => x.id));
+  const conRegistri = p => S.regs.some(r => periodoDi(az, r.dataReg) === p && (r.iva || []).length && (r.ivaDa || idsRegBlu.has(r.ripresaId) || r.fonte === "profis"));
   return periodi(az).map(p => {
-    let M = null;
+    let M = null, daReg = false;
     if (rip) {
       const mFine = az.periodicita === "T" ? p * 3 : p, fine = `${S.anno}-${String(mFine).padStart(2, "0")}-${String(new Date(S.anno, mFine, 0).getDate()).padStart(2, "0")}`;
-      if (fine <= rip.data) {
+      if (fine <= rip.data && !man[p] && conRegistri(p)) { ultimoManuale = true; nMan++; daReg = true; }
+      else if (fine <= rip.data) {
         M = man[p] || null;
         // periodo liquidato nel programma precedente e non inserito: non se ne conoscono gli importi
         if (!M) { debRip = 0; credRip = 0; ultimoManuale = false; return { p, pre: true, vp2: 0, vp3: 0, vp4: 0, vp5: 0, vp6: 0, vp7: 0, vp8: 0, vp9: 0, vp12: 0, vp13: 0, vp14: 0, versare: 0, credito: 0, cod: "", scad: "", riporto: 0 }; }
@@ -2719,6 +2724,7 @@ function liquidazioni() {
     else if (vp14 < 0) { credito = -vp14; credRip = credito; }
     const o = { p, vp2, vp3, vp4, vp5, vp6, vp7, vp8, vp9, vp12, vp13, metodo, vp14, versare, credito, cod, scad, riporto: debRip };
     if (M) Object.assign(o, { pre: true, manuale: true, fonte: M.fonte || "manuale", dovuta });
+    else if (daReg) Object.assign(o, { daRegistri: true, dovuta });
     return o;
   });
 }
@@ -2762,7 +2768,7 @@ function renderIVA() {
   const sosp = (nPre || nMan) && liqPeriodicitaSospetta();
   $("#liq-pre-auto").disabled = !!sosp;
   $("#liq-pre-testo").innerHTML = sosp ? `<span class="err">Le liquidazioni importate sono trimestrali, ma l'azienda è ${az.periodicita ? "mensile" : "senza periodicità indicata"}: imposta la periodicità trimestrale nella scheda Azienda e torna qui.</span>` : esc(nPre ? `${nPre} ${nPre === 1 ? "periodo liquidato" : "periodi liquidati"} nel programma precedente senza importi: ricavali dal giroconto di liquidazione importato oppure inseriscili a mano.` : `Periodi liquidati nel programma precedente: importi inseriti (${nMan}). Il riporto di debito o credito prosegue nei periodi successivi.`);
-  $("#liq-body").innerHTML = liqAll.map(l => l.pre && !l.manuale ? `<tr class="pre"><td>${nomePeriodo(az, l.p)}</td><td colspan="8">Liquidato nel programma precedente (ripresa saldi al ${itDate(az.ripresa.data)})</td><td><button type="button" class="btn small" data-liq-pre="${l.p}">Inserisci gli importi</button></td></tr>` : `<tr${l.manuale ? ' class="liq-man"' : ""}><td>${nomePeriodo(az, l.p)}${l.manuale ? `<div class="sub"><span class="pill src">${l.fonte === "registrazioni" ? "dalle registrazioni" : "inserita"}</span></div>${(() => { const c = liqDaRegistrazioni(l.p); return c.eraio == null ? "" : `<div class="sub">${Math.abs(c.eraio - l.dovuta) < 0.01 ? `<span class="ok">in contabilità ${num(c.eraio)} ✓</span>` : `<span class="err">in contabilità ${num(c.eraio)}</span>`}</div>`; })()}<button type="button" class="btn small" data-liq-pre="${l.p}" style="margin-top:4px">Modifica</button>` : ""}</td><td class="num">${num(l.vp2)}</td><td class="num">${num(l.vp3)}</td><td class="num">${num(l.vp4)}</td><td class="num">${num(l.vp5)}</td>
+  $("#liq-body").innerHTML = liqAll.map(l => l.pre && !l.manuale ? `<tr class="pre"><td>${nomePeriodo(az, l.p)}</td><td colspan="8">Liquidato nel programma precedente (ripresa saldi al ${itDate(az.ripresa.data)})</td><td><button type="button" class="btn small" data-liq-pre="${l.p}">Inserisci gli importi</button></td></tr>` : `<tr${l.manuale ? ' class="liq-man"' : ""}><td>${nomePeriodo(az, l.p)}${l.manuale ? `<div class="sub"><span class="pill src">${l.fonte === "registrazioni" ? "dalle registrazioni" : "inserita"}</span></div>${(() => { const c = liqDaRegistrazioni(l.p); return c.eraio == null ? "" : `<div class="sub">${Math.abs(c.eraio - l.dovuta) < 0.01 ? `<span class="ok">in contabilità ${num(c.eraio)} ✓</span>` : `<span class="err">in contabilità ${num(c.eraio)}</span>`}</div>`; })()}<button type="button" class="btn small" data-liq-pre="${l.p}" style="margin-top:4px">Modifica</button>` : l.daRegistri ? `<div class="sub"><span class="pill src">dai registri IVA</span></div>${(() => { const c = liqDaRegistrazioni(l.p); return c.eraio == null ? "" : `<div class="sub">${Math.abs(c.eraio - l.dovuta) < 0.01 || Math.abs(c.eraio - l.vp6) < 0.01 ? `<span class="ok">come il giroconto ${num(c.eraio)} ✓</span>` : `<span class="err">giroconto ${num(c.eraio)}</span>`}</div>`; })()}<button type="button" class="btn small" data-liq-pre="${l.p}" style="margin-top:4px">Modifica</button>` : ""}</td><td class="num">${num(l.vp2)}</td><td class="num">${num(l.vp3)}</td><td class="num">${num(l.vp4)}</td><td class="num">${num(l.vp5)}</td>
     <td class="num">${[l.vp7 ? `+${num(l.vp7)} debito prec.` : "", l.vp8 ? `−${num(l.vp8)} credito prec.` : "", l.vp9 ? `−${num(l.vp9)} credito anno prec.` : "", l.vp13 ? `−${num(l.vp13)} acconto` : ""].filter(Boolean).join("<br>") || "–"}</td>
     <td class="num">${l.vp12 ? num(l.vp12) : "–"}</td><td class="num">${l.versare ? num(l.versare) : "–"}</td><td class="num">${l.credito ? num(l.credito) : "–"}</td>
     <td>${l.versare ? `<span class="mono">${l.cod}</span> entro il ${l.scad}` : l.riporto ? `Riportato (≤ ${num(sogliaIva(S.anno))} €)` : "–"}</td></tr>`).join("");
@@ -5658,7 +5664,10 @@ function bluRicostruisci() {
   // mastrino con gli importi in dare: si ricostruisce "allo specchio" (dare e avere scambiati) e alla fine si raddrizza
   const specchio = X.latoNoto === "D", C = specchio ? BLU.C.map(r => ({ ...r, dare: r.avere, avere: r.dare })) : BLU.C;
   const perData = new Map(); C.forEach((r, i) => { if (!perData.has(r.data)) perData.set(r.data, []); perData.get(r.data).push(i); });
-  const usate = new Set(), regs = [], nonRis = [], vuote = [], dav = [];
+  const usate = new Set(), regs = [], nonRis = [], vuote = [], dav = [], chiusure = [];
+  // rilevazione del risultato d'esercizio (giroconto da "Utile/Perdita di esercizio" a "Utile da destinare"): è una scrittura
+  // di chiusura, la fa la contabilità a fine anno; importata a metà anno azzererebbe il conto economico
+  const risultato = x => /RISULTATO/i.test(BLU.pdc?.[x.cod]?.l1 || "") || /^(utile|perdita|risultato)( \(perdita\))? (di|d'|dell'|del)\s*eserciz/i.test(String(x.dconto || "").trim());
   // registrazioni con più conti in dare: il mastrino dà solo il totale, gli importi dei singoli conti si prendono dal libro giornale CSV.
   // Prima si abbinano le righe con la stessa descrizione, poi le altre della stessa data; se non c'è una combinazione esatta
   // la registrazione si importa comunque con gli importi più vicini e resta segnalata da verificare.
@@ -5684,6 +5693,7 @@ function bluRicostruisci() {
     X.forEach((R, n) => { const I = info[n]; if (I.acc.size <= 1 || I.sol) return; const sol = prova(R, I, soloDesc, maxPool); if (sol) { I.sol = sol; sol.forEach(i => usate.add(i)); } });
   X.forEach((R, n) => {
     const I = info[n]; let righe, approx = false;
+    if (R.righe.some(risultato) && /utile|perdita|risultato/i.test(R.desc)) { chiusure.push(R); return; }
     if (I.acc.size <= 1) {
       righe = []; let fatto = false;
       for (const x of R.righe) {
@@ -5722,7 +5732,7 @@ function bluRicostruisci() {
   // periodo coperto dal libro giornale CSV: le registrazioni con più conti in dare fuori periodo non si possono ricostruire
   const dateC = C.map(r => r.data).filter(Boolean).sort(), csvDa = dateC[0] || "", csvA = dateC[dateC.length - 1] || "";
   const fuori = X.filter((R, n) => info[n].acc.size > 1 && (R.data < csvDa || R.data > csvA));
-  return { regs, nonRis, vuote, dav, ultima, csvDa, csvA, fuori, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
+  return { regs, nonRis, vuote, dav, chiusure, ultima, csvDa, csvA, fuori, primaData: X.reduce((m, R) => !m || R.data < m ? R.data : m, "") };
 }
 /* tipo di cliente o fornitore dal CSV (tipo riga) e dai partitari */
 function bluCliTipo() {
@@ -5760,8 +5770,9 @@ function bluCalcola() {
 function bluApertura() {
   if (!BLU.bil || !BLU.C || !BLU.ric) return null;
   const al = BLU.ric.ultima, tipi = bluCliTipo(), movNc = new Map(); let movC = 0, movF = 0;
+  const escluse = new Set((BLU.ric.chiusure || []).map(R => `${R.data}|${bluNd(R.desc)}`));
   for (const r of BLU.C) {
-    if (!r.data || r.data > al) continue;
+    if (!r.data || r.data > al || escluse.has(`${r.data}|${bluNd(r.desc)}`)) continue;
     const v = r.dare - r.avere, t = tipi.get(r.cod);
     if (t === "C") movC += v; else if (t === "F") movF += v; else { const k = bluNc(r.dconto); movNc.set(k, (movNc.get(k) || 0) + v); }
   }
@@ -5969,6 +5980,7 @@ function renderBlu() {
   const righe = [];
   if (R) righe.push(`<div><span>Registrazioni dal ${itDate(R.primaData)} al ${itDate(R.ultima)}</span><span class="mono">${R.regs.length}${R.nonRis.length ? ` · <span class="err">${R.nonRis.length} non ricostruite</span>` : " · tutte in quadratura"}${R.vuote.length ? ` · ${R.vuote.length} a importo zero escluse` : ""}</span></div>`);
   const elenco = l => l.slice(0, 12).map(x => `${itDate(x.data)} n. ${esc(x.n)} ${esc(x.desc)} (${num(x.tot)})`).join(" · ") + (l.length > 12 ? ` · e altre ${l.length - 12}` : "");
+  if (R?.chiusure?.length) righe.push(`<div><span>${R.chiusure.map(x => `${itDate(x.data)} n. ${x.n} ${esc(x.desc)} (${num(x.tot)})`).join(" · ")}: è la rilevazione del risultato d'esercizio, non si importa (la chiusura dell'esercizio la fa la contabilità)</span><span></span></div>`);
   if (R?.dav?.length && !R.fuori?.length) righe.push(`<div><span><span class="pill media">da verificare</span> ${R.dav.length} ${R.dav.length === 1 ? "registrazione ha" : "registrazioni hanno"} più conti in ${BLU.X?.latoNoto === "D" ? "avere" : "dare"} e nel libro giornale CSV non c'è una combinazione esatta degli importi: si importano con gli importi più vicini, da controllare in prima nota (cerca «da verificare»): ${elenco(R.dav)}</span><span></span></div>`);
   if (R?.nonRis?.length) righe.push(`<div><span><span class="pill bassa">non importate</span> ${R.nonRis.length} ${R.nonRis.length === 1 ? "registrazione non quadra" : "registrazioni non quadrano"} nemmeno con il libro giornale CSV e ${R.nonRis.length === 1 ? "va registrata" : "vanno registrate"} a mano dopo l'importazione: ${elenco(R.nonRis)}</span><span></span></div>`);
   if (R && (nCli.size || nFor.size)) righe.push(`<div><span>Clienti e fornitori movimentati</span><span class="mono">${nCli.size} clienti · ${nFor.size} fornitori</span></div>`);
@@ -7400,13 +7412,24 @@ function briIva(info, desc) {
   return o;
 }
 function briLeggi(righe, col, nomeFile) {
-  const docs = []; let sez = 0, cur = null, periodo = "";
+  const docs = []; let sez = 0, cur = null, periodo = "", riporto = null;
   for (let i = col.riga + 1; i < righe.length; i++) {
     const r = righe[i] || [], desc = String(r[col.desc] ?? "").trim(), info = String(r[col.info] ?? "").trim();
     const dare = r2(bluNum(r[col.dare])), avere = r2(bluNum(r[col.avere]));
     if (typeof r[col.id] === "number" && !desc) { sez = r[col.id]; cur = null; continue; }
     const pl = r.find(x => /PERIODO DI LIQUIDAZIONE/i.test(String(x || ""))); if (pl) { periodo = String(pl).replace(/.*:\s*/, ""); continue; }
+    // credito IVA riportato dal periodo precedente (riepilogo della liquidazione): dare = credito
+    if (riporto == null && /^riporto da periodo precedente/i.test(desc)) { riporto = r2(dare - avere); continue; }
+    // riepilogo della liquidazione in fondo al registro: non sono righe del documento precedente
+    if (r.some(x => /^\s*(liquidazione iva|Testo\d+:)/i.test(String(x ?? "")))) { cur = null; continue; }
     if (!desc) continue;
+    // integrazione delle fatture in reverse charge (es. "CESSIONE COMPENSATIVA … PER fattura X n.FPR 10/26 del 20/01/2026 PROT: 11"):
+    // non ha la data di registrazione; si annota sulla registrazione del giornale con la stessa descrizione e lo stesso totale
+    const integr = /^PER\s+fattura\s+(.+?)\s+n\.?\s*(.+?)\s+del\s+(\d{1,2}\/\d{1,2}\/\d{4})/i.exec(info);
+    if (integr && (dare || avere)) {
+      cur = { tipo: "integr", sez, file: nomeFile, tipoDoc: desc.toLowerCase(), numero: integr[2], data: briData(integr[3]), reg: briData(integr[3]), cp: integr[1].trim(), id: "", tDare: dare, tAvere: avere, iva: [], conti: [] };
+      docs.push(cur); continue;
+    }
     const testata = /^(.*?)\s+(\S.*?)\s+del\s+(\d{1,2}\/\d{1,2}\/\d{4}),\s*registrata il\s+(\d{1,2}\/\d{1,2}\/\d{4})/i.exec(info);
     if (testata) {
       const id = /(?:P\.\s*IVA|C\.\s*F\.)\s*:?\s*([A-Z0-9]+)/i.exec(desc);
@@ -7425,12 +7448,13 @@ function briLeggi(righe, col, nomeFile) {
   for (const d of docs) {
     // registro di appartenenza: dal numero del registro di Blustring o, se manca, dal segno della testata
     if (d.tipo === "corr") { d.causale = "CO"; continue; }
+    if (d.tipo === "integr") { d.causale = "INT"; continue; }
     const venIva = d.iva.some(v => v.vendite) && !d.iva.some(v => !v.vendite);
     const vend = d.sez === 2 || (d.sez !== 1 && (venIva || d.tDare > d.tAvere));
     const nc = /nota|credito/.test(d.tipoDoc) || (vend ? d.tAvere > d.tDare : d.tDare > d.tAvere);
     d.causale = vend ? (nc ? "NE" : "FE") : (nc ? "NR" : "FR");
   }
-  return { docs, periodo };
+  return { docs, periodo, riporto };
 }
 /* conto del piano dei conti dalla descrizione del conto di Blustring */
 const BRI_CONTI = [
@@ -7452,7 +7476,7 @@ function briProponi(desc, ricavo) {
 }
 function briConti() {
   const m = new Map();
-  for (const d of BRI.docs) for (const x of d.conti) {
+  for (const d of BRI.docs) if (d.tipo !== "integr") for (const x of d.conti) {
     const ric = ["FE", "NE", "CO"].includes(d.causale), k = `${ric ? "R" : "C"}|${x.desc}`;
     const o = m.get(k) || { k, desc: x.desc, ric, n: 0, tot: 0 }; o.n++; o.tot = r2(o.tot + (ric ? x.avere - x.dare : x.dare - x.avere)); m.set(k, o);
   }
@@ -7512,7 +7536,8 @@ async function briCarica(files) {
     try {
       const { righe } = await bluFoglio(f), col = briRiconosci(righe);
       if (!col) { letti.push(`${f.name}: non sono i registri IVA integrati di Blustring`); continue; }
-      const { docs, periodo } = briLeggi(righe, col, f.name);
+      const { docs, periodo, riporto } = briLeggi(righe, col, f.name);
+      if (riporto != null && /^0?1\/0?1\//.test(periodo)) BRI.riporto = riporto;
       BRI.docs = BRI.docs.filter(d => d.file !== f.name).concat(docs);
       BRI.file = BRI.file.filter(x => x.nome !== f.name).concat([{ nome: f.name, n: docs.length, periodo }]);
       letti.push(`${f.name}: registri IVA integrati, ${docs.length} documenti${periodo ? ` (${periodo})` : ""}`);
@@ -7529,7 +7554,21 @@ async function briImporta() {
   try { localStorage.setItem(briMapKey(), JSON.stringify(BRI.mappa)); } catch {}
   try {
     const esistenti = new Set(tutteRegs().map(r => r.chiave || chiaveDi(r)).filter(Boolean));
-    const anagNuove = new Map(), regs = []; let gia = 0, sbil = 0;
+    const anagNuove = new Map(), regs = [], annotate = []; let gia = 0, sbil = 0;
+    // contabilità già importata dal giornale (Blustring, Profis…): i documenti ci sono già, si annotano solo le righe IVA
+    // sulle registrazioni corrispondenti invece di crearne di nuove (altrimenti costi, ricavi e partite raddoppiano)
+    const giornale = S.regs.filter(r => !(r.iva || []).length && !r.ivaDa && ["FR", "FE", "NR", "NE", "CO", "CF", "RF", "GEN"].includes(r.causale));
+    const presi = new Set();
+    const totDi = r => r.partita ? Math.abs(r.partita.totale) : r2((r.righe || []).filter(x => x.anagId).reduce((s, x) => s + Math.abs(x.dare - x.avere), 0));
+    const cifre = t => String(t || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const trovaGiornale = (reg, d) => {
+      const lib = giornale.filter(r => !presi.has(r.id));
+      if (reg.causale === "CO") { const t = r2(d.tDare - d.tAvere); return lib.find(r => r.dataReg === reg.dataReg && (r.causale === "CO" || (r.righe || []).some(x => x.conto === K.corrisp)) && Math.abs(r2((r.righe || []).reduce((s, x) => s + x.dare, 0)) - Math.abs(t)) < 0.01); }
+      const tot = Math.abs(reg.partita?.totale || 0), num = cifre(reg.numDoc);
+      const stesso = r => r.anagId === reg.anagId || (num.length >= 1 && cifre(r.descr).includes(num));
+      return lib.find(r => r.dataReg === reg.dataReg && Math.abs(totDi(r) - tot) < 0.01 && stesso(r) && (!num || cifre(r.descr).includes(num) || r.anagId === reg.anagId))
+        || lib.find(r => Math.abs(totDi(r) - tot) < 0.01 && r.anagId === reg.anagId && num && cifre(r.descr).includes(num));
+    };
     const anagDi = d => {
       const tipo = ["FE", "NE"].includes(d.causale) ? "C" : "F", piva = /^\d{11}$/.test(d.id) ? d.id : "", cf = piva ? "" : d.id;
       const k = `${tipo}|${d.id || briNorm(d.cp)}`; if (anagNuove.has(k)) return anagNuove.get(k);
@@ -7537,8 +7576,18 @@ async function briImporta() {
       if (!a) { a = { id: uid(), aziendaId: S.aziendaId, tipo, denominazione: d.cp, piva, cf, conto: "", creato: adesso, fonte: "blustring" }; out.push(["anagrafiche", a]); }
       anagNuove.set(k, a); return a;
     };
+    let nInt = 0; const intNo = [];
     for (const d of BRI.docs) {
       if (!briAnno(d)) continue;
+      if (d.tipo === "integr") {
+        // integrazione IVA in reverse charge: solo annotazione nel registro vendite della registrazione del giornale
+        const tot = Math.abs(r2(d.tDare - d.tAvere)), k = cifre(d.tipoDoc);
+        const c = giornale.filter(r => !presi.has(r.id) && r.dataReg >= d.data && cifre(r.descr).includes(k) && Math.abs(r2((r.righe || []).reduce((s, x) => s + x.dare, 0)) - tot) < 0.01).sort((a, b) => a.dataReg.localeCompare(b.dataReg))[0];
+        if (!c) { intNo.push(`${d.tipoDoc} per fattura ${d.cp} n. ${d.numero}`); continue; }
+        presi.add(c.id); nInt++;
+        annotate.push({ ...c, ivaDa: rid, iva: d.iva.filter(v => v.imp || v.iva).map(v => ({ reg: "V", cod: v.cod, imp: r2(Math.abs(v.imp)), iva: r2(Math.abs(v.iva)), detr: 0, esig: "I", rc: true, nat: "", td: "TD16" })) });
+        continue;
+      }
       const C = d.causale, ven = ["FE", "NE"].includes(C), nc = ["NE", "NR"].includes(C), sg = nc ? -1 : 1;
       const reg = { id: uid(), causale: C, dataReg: d.reg, dataDoc: d.data || d.reg, numDoc: d.numero || "", righe: [], iva: [], abbinamenti: [], fonte: "blustring", file: d.file, ripresaId: rid, aziendaId: S.aziendaId, anno, creato: adesso, trim: trimDi(d.reg), mese: Number(d.reg.slice(5, 7)) };
       if (C === "CO") {
@@ -7571,20 +7620,34 @@ async function briImporta() {
       else if (!quadra(reg)) { sbil++; avvisi.push(`${reg.descr} del ${itDate(reg.dataReg)}: dare e avere non coincidono nel file`); continue; }
       reg.chiave = C === "CO" ? `C|${reg.dataReg}|${r2(d.tDare - d.tAvere).toFixed(2)}` : chiaveDi(reg);
       if (esistenti.has(reg.chiave)) { gia++; continue; }
+      const g = trovaGiornale(reg, d);
+      if (g) {
+        presi.add(g.id);
+        // scissione dei pagamenti (fatture alla PA): l'IVA del giornale va sul conto "IVA split payment", non è esigibile
+        const split = (g.righe || []).some(x => x.conto === "35.01.49");
+        annotate.push({ ...g, iva: split ? reg.iva.map(v => v.reg === "V" ? { ...v, esig: "S" } : v) : reg.iva, ivaDa: rid, numDoc: g.numDoc || reg.numDoc, dataDoc: g.dataDoc && g.dataDoc !== g.dataReg ? g.dataDoc : reg.dataDoc, ...(g.causale === "GEN" ? { causale: C } : {}) });
+        continue;
+      }
       const e = erroriReg(reg); if (e.length) throw new Error(`${reg.descr} del ${itDate(reg.dataReg)}: ${e[0]}`);
       regs.push(reg);
     }
-    if (!regs.length) throw new Error(gia ? `tutti i ${gia} documenti sono già in contabilità` : "nessun documento da importare");
+    if (!regs.length && !annotate.length) throw new Error(gia ? `tutti i ${gia} documenti sono già in contabilità` : "nessun documento da importare");
     for (const r of regs) out.push(["registrazioni", r]);
+    for (const r of annotate) out.push(["registrazioni", r]);
     msg(`Salvataggio di ${out.length} documenti…`);
     await bluScrivi(out, (i, n) => msg(`Salvataggio… ${i} di ${n}`));
-    if (!S.db && !lsLoad().registrazioni.some(r => r.id === regs[regs.length - 1].id)) throw new Error("lo spazio del browser non basta per salvare tutte le registrazioni: apri la contabilità dentro Claude o dal portale con l'archivio condiviso");
+    if (!S.db && regs.length && !lsLoad().registrazioni.some(r => r.id === regs[regs.length - 1].id)) throw new Error("lo spazio del browser non basta per salvare tutte le registrazioni: apri la contabilità dentro Claude o dal portale con l'archivio condiviso");
     const fileN = BRI.file.map(f => f.nome).join(", ");
-    await store.put("aziende", { ...aziendaCorrente(), importRegBlu: (aziendaCorrente().importRegBlu || []).concat([{ id: rid, file: fileN, n: regs.length, anno, creato: adesso }]) });
+    // credito IVA dell'anno precedente dal riepilogo dei registri, se non è già indicato nella scheda IVA
+    const azI = aziendaCorrente(), Yi = String(anno), confI = (azI.iva || {})[Yi] || {};
+    const credNuovo = BRI.riporto > 0 && !confI.credPrec ? BRI.riporto : 0;
+    await store.put("aziende", { ...azI, ...(credNuovo ? { iva: { ...(azI.iva || {}), [Yi]: { ...confI, credPrec: credNuovo } } } : {}), importRegBlu: (aziendaCorrente().importRegBlu || []).concat([{ id: rid, file: fileN, n: regs.length, annotate: annotate.length, anno, creato: adesso }]) });
     const n = c => regs.filter(r => r.causale === c).length, nAn = out.filter(([c]) => c === "anagrafiche").length;
-    log("Registri IVA Blustring", `${regs.length} registrazioni`, "ok");
+    log("Registri IVA Blustring", `${regs.length} registrazioni, ${annotate.length} documenti del giornale annotati nei registri IVA`, "ok");
     BRI = { docs: [], file: [], mappa: {}, fonte: {} }; msg("");
-    briMsg(`Importazione completata: ${[n("FR") ? `${n("FR")} fatture ricevute` : "", n("NR") ? `${n("NR")} note di credito ricevute` : "", n("FE") ? `${n("FE")} fatture emesse` : "", n("NE") ? `${n("NE")} note di credito emesse` : "", n("CO") ? `${n("CO")} corrispettivi giornalieri` : ""].filter(Boolean).join(", ")}${nAn ? `; ${nAn} nuovi clienti e fornitori` : ""}${gia ? `; ${gia} documenti erano già in contabilità e non sono stati ripetuti` : ""}${sbil ? `; ${sbil} non importati perché dare e avere non coincidono (${avvisi.slice(0, 2).join("; ")})` : ""}. Le fatture sono partite aperte: chiudile con gli incassi e i pagamenti degli estratti conto. Controlla i registri nella scheda Registri IVA.`, sbil ? "work" : "ok");
+    if (intNo.length) avvisi.push(`${intNo.length} integrazioni in reverse charge non trovate nel giornale (${intNo.slice(0, 2).join("; ")})`);
+    if (annotate.length && !regs.length) briMsg(`Registri IVA importati: ${annotate.length} documenti già presenti in contabilità dal libro giornale sono stati annotati nei registri IVA (codice IVA, imponibile, imposta, detraibile), senza creare nuove registrazioni${nInt ? ` (di cui ${nInt} integrazioni IVA in reverse charge nel registro vendite)` : ""}${gia ? `; ${gia} erano già nei registri` : ""}${sbil ? `; ${sbil} non importati perché dare e avere non coincidono` : ""}${intNo.length ? `; ${avvisi[avvisi.length - 1]}` : ""}${credNuovo ? `; credito IVA dell'anno precedente ${num(credNuovo)} € (riporto dei registri) indicato nella scheda IVA` : ""}. Le liquidazioni IVA si possono ora ricavare dai registri.`, sbil || intNo.length ? "work" : "ok"); else
+    briMsg(`Importazione completata: ${annotate.length ? `${annotate.length} documenti del giornale annotati nei registri IVA; ` : ""}${[n("FR") ? `${n("FR")} fatture ricevute` : "", n("NR") ? `${n("NR")} note di credito ricevute` : "", n("FE") ? `${n("FE")} fatture emesse` : "", n("NE") ? `${n("NE")} note di credito emesse` : "", n("CO") ? `${n("CO")} corrispettivi giornalieri` : ""].filter(Boolean).join(", ")}${nAn ? `; ${nAn} nuovi clienti e fornitori` : ""}${gia ? `; ${gia} documenti erano già in contabilità e non sono stati ripetuti` : ""}${sbil ? `; ${sbil} non importati perché dare e avere non coincidono (${avvisi.slice(0, 2).join("; ")})` : ""}. Le fatture sono partite aperte: chiudile con gli incassi e i pagamenti degli estratti conto. Controlla i registri nella scheda Registri IVA.`, sbil ? "work" : "ok");
   } catch (e) {
     msg(""); briMsg(`Importazione non riuscita: ${e.message || e}`, "err");
   } finally { briInCorso = false; renderBri(); }
@@ -7608,8 +7671,9 @@ async function briImporta() {
     briElimina = false;
     const az = aziendaCorrente(), idsImp = new Set((az?.importRegBlu || []).map(x => x.id));
     const ids = new Set(tutteRegs().filter(r => idsImp.has(r.ripresaId)).map(r => r.id));
+    const togli = tutteRegs().filter(r => idsImp.has(r.ivaDa)).map(r => { const n = { ...r, iva: [] }; delete n.ivaDa; return ["registrazioni", n]; });
     briMsg(`Eliminazione di ${ids.size} registrazioni…`, "work");
-    try { await bluElimina(ids); const n = { ...aziendaCorrente() }; delete n.importRegBlu; await store.put("aziende", n); briMsg(`Importazioni eliminate: ${ids.size} registrazioni.`, "ok"); }
+    try { await bluElimina(ids); if (togli.length) await bluScrivi(togli, () => {}); const n = { ...aziendaCorrente() }; delete n.importRegBlu; await store.put("aziende", n); briMsg(`Importazioni eliminate: ${ids.size} registrazioni.`, "ok"); }
     catch (er) { briMsg(`Eliminazione non riuscita: ${er.message || er}`, "err"); }
     renderBri();
   });
@@ -7775,11 +7839,12 @@ function lpApri(p) {
   const M = (((az.iva || {})[String(S.anno)] || {}).liqPre || {})[p];
   LP = { p, fonte: M?.fonte || "manuale" };
   $("#liq-pre-t").textContent = `${nomePeriodo(az, p)} ${S.anno} · liquidazione del programma precedente`;
-  const D = M || liqDaRegistrazioni(p);
+  const dr = !M && liquidazioni().find(l => l.p === p && l.daRegistri);
+  const D = M || dr || liqDaRegistrazioni(p);
   if (!M) LP.fonte = "registrazioni";
   for (const k of ["vp2", "vp3", "vp4", "vp5"]) $("#lp-" + k).value = D[k] ? D[k] : "";
   $("#lp-vp9").value = M && M.vp9 != null ? M.vp9 : "";
-  $("#lp-elimina").hidden = !M; $("#lp-msg").textContent = M ? "" : "Importi proposti dalle registrazioni importate: verificali e salva.";
+  $("#lp-elimina").hidden = !M; $("#lp-msg").textContent = M ? "" : dr ? "Importi calcolati dai registri IVA: cambiali solo se la liquidazione presentata è diversa, poi salva." : "Importi proposti dalle registrazioni importate: verificali e salva.";
   const f = $("#liq-pre-form"); f.hidden = false; lpAnteprima(); f.scrollIntoView({ block: "nearest" }); $("#lp-vp2").focus();
 }
 $("#liq-body").addEventListener("click", e => { const b = e.target.closest("[data-liq-pre]"); if (b) lpApri(Number(b.dataset.liqPre)); });
