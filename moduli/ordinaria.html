@@ -904,9 +904,9 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
     </div>
     <div class="card" id="prf-card">
       <div class="row"><h2>Importa la contabilità da Profis</h2><span class="spacer"></span><button class="btn small" id="prf-svuota" type="button">Ricomincia</button></div>
-      <p class="note">Carica il libro giornale (prima nota) e i registri IVA esportati da Profis in Excel. Le registrazioni si riportano con gli stessi conti (piano S1 per le imprese, SP_SIS per i professionisti); fatture e note di credito diventano partite aperte e gli incassi e i pagamenti si collegano alle fatture dal riferimento nella descrizione o, se non corrisponde, dall'importo. Dai registri IVA si ricavano codici IVA, esenzioni e reverse charge per i registri e le liquidazioni. Profis non riporta i corrispettivi nel giornale esportato: carica anche il registro dei corrispettivi esportato in Excel, come i registri IVA, e ogni giornata diventa una registrazione con cassa, ricavi, IVA e tassa di soggiorno; si può importare anche da solo, dopo il giornale.</p>
+      <p class="note">Carica il libro giornale (prima nota) e i registri IVA esportati da Profis in Excel. Le registrazioni si riportano con gli stessi conti (piano S1 per le imprese, SP_SIS per i professionisti); fatture e note di credito diventano partite aperte e gli incassi e i pagamenti si collegano alle fatture dal riferimento nella descrizione o, se non corrisponde, dall'importo. Dai registri IVA si ricavano codici IVA, esenzioni e reverse charge per i registri e le liquidazioni. Profis non riporta i corrispettivi nel giornale esportato: carica anche il registro dei corrispettivi esportato in Excel, come i registri IVA, e ogni giornata diventa una registrazione con cassa, ricavi, IVA e tassa di soggiorno; si può importare anche da solo, dopo il giornale. Gli scadenzari clienti e fornitori di Profis allineano le partite aperte: le fatture che Profis considera pagate ricevono gli incassi e i pagamenti dello stesso nominativo rimasti su altre fatture, le altre restano aperte per il residuo di Profis. I saldi non cambiano.</p>
       <div class="drop" id="drop-prf" tabindex="0" role="button" aria-label="Seleziona i file esportati da Profis">
-        <strong>Trascina qui il libro giornale, i registri IVA e il registro dei corrispettivi di Profis</strong>
+        <strong>Trascina qui il libro giornale, i registri IVA, il registro dei corrispettivi e gli scadenzari di Profis</strong>
         <span class="hint">Puoi selezionarli insieme: ognuno viene riconosciuto dal contenuto</span>
         <div class="formats"><span>XLSX</span><span>XLS</span></div>
       </div>
@@ -3325,8 +3325,9 @@ function mappaConto(cod, descr) {
 /* scadenzario → partite */
 const RE_CONTO_PAR = /^(11|33)\.03(\.\d{2}){1,2}$/;
 const RE_DOC = /^(ft|fa|fatt?|nc|nd|ac|acc|ns|fd|td\d\d|doc|ric)\b\.?/i;
-function nomeProfis(n) {
+function nomeProfis(n, artefatti = true) {
   n = String(n ?? "").replace(/\s+$/, "");
+  if (!artefatti) return n.replace(/\s{2,}/g, " ").trim();
   // Profis unisce due campi da 30 caratteri con uno spazio: ricompone la parola spezzata
   if (n.length > 31 && n[30] === " " && /[A-Za-z0-9]/.test(n[29]) && /[A-Za-z0-9.]/.test(n[31])) n = n.slice(0, 30) + n.slice(31);
   // toglie la chiave di ricerca finale (es. "BATTETA GABRIELE BATTET")
@@ -3334,7 +3335,7 @@ function nomeProfis(n) {
   if (w.length >= 3) {
     const k = w[w.length - 1], prima = w.slice(0, -1).join("").toUpperCase().replace(/[^A-Z0-9]/g, "");
     let i = 0; for (const ch of prima) if (ch === k[i]) i++;
-    if (/^[A-Z]{5,6}$/.test(k) && i === k.length) n = w.slice(0, -1).join(" ");
+    if (/^[A-Z]{5,6}$/.test(k) && i === k.length && prima.startsWith(k.slice(0, 3))) n = w.slice(0, -1).join(" ");
   }
   return n.replace(/\s{2,}/g, " ").trim();
 }
@@ -3350,6 +3351,9 @@ function datiDoc(t) {
 }
 function partiteSenzaIntestazione(rows, tipoDefault) {
   const out = [];
+  // export di Profis con i nomi "spezzati" (due campi da 30 caratteri e chiave di ricerca finale): solo se nel file compare la chiave
+  const chiave = n => { const w = String(n || "").trim().split(/\s+/), k = w[w.length - 1] || "", pr = w.slice(0, -1).join("").toUpperCase().replace(/[^A-Z0-9]/g, ""); return w.length >= 3 && /^[A-Z]{5,6}$/.test(k) && pr.startsWith(k); };
+  const artefatti = rows.some(r => r.some(c => typeof c === "string" && chiave(c)));
   for (const r of rows) {
     const i = r.findIndex(c => RE_CONTO_PAR.test(String(c ?? "").trim())); if (i < 0) continue;
     const tipo = /^11/.test(String(r[i]).trim()) ? "C" : "F";
@@ -3365,7 +3369,7 @@ function partiteSenzaIntestazione(rows, tipoDefault) {
     if (!residuo) continue;
     const d = datiDoc(jDoc >= 0 ? r[jDoc] : "");
     const dataReg = i > 0 ? dataCella(r[i - 1]) : "";
-    out.push({ id: uid(), tipo: tipo || tipoDefault, nome: profis ? nomeProfis(nome) : nome, piva: "", cf: "", numero: d.numero, data: d.data || dataReg || "",
+    out.push({ id: uid(), tipo: tipo || tipoDefault, nome: profis ? nomeProfis(nome, artefatti) : nome, piva: "", cf: "", numero: d.numero, data: d.data || dataReg || "",
       scadenza: profis ? dataCella(r[i + 4]) || "" : "", importo: r2(residuo) });
   }
   return out;
@@ -3438,9 +3442,11 @@ async function caricaPartite(files) {
       let p = partiteDaRighe(righe, tipo);
       if (!p.length && testo) p = await agentePartite(f.name, testo, tipo);
       if (!p.length) { ripMsg(`${f.name}: nessuna partita riconosciuta. Servono almeno le colonne nominativo e importo residuo`, "err"); continue; }
-      RIP.partite.push(...p); ripSalva();
+      const tutteDopo = ISO(RIP.data) && p.every(x => x.data && x.data > RIP.data);
+      if (!tutteDopo) { RIP.partite.push(...p); ripSalva(); }
       const nC = p.filter(x => x.tipo === "C"), nF = p.filter(x => x.tipo === "F"), tot = l => eur(l.reduce((a, x) => a + x.importo, 0));
       const dopo = ISO(RIP.data) ? p.filter(x => x.data && x.data > RIP.data).length : 0;
+      if (dopo && dopo === p.length) rsMsgP(`${f.name}: tutte le ${p.length} partite sono successive al ${itDate(RIP.data)}, quindi non sono state aggiunte alle partite da riprendere. Se è uno scadenzario di Profis dell'anno in corso, caricalo nella sezione «Importa la contabilità da Profis», insieme al libro giornale: lì allinea le partite aperte a quelle di Profis.`, "err"); else
       rsMsgP(`${f.name}: ${[nC.length ? `${nC.length} ${nC.length === 1 ? "partita" : "partite"} clienti per ${tot(nC)}` : "", nF.length ? `${nF.length} ${nF.length === 1 ? "partita" : "partite"} fornitori per ${tot(nF)}` : ""].filter(Boolean).join(" e ")}${dopo ? `. Attenzione: ${dopo} con data successiva al ${itDate(RIP.data)}` : ""}`, dopo ? "err" : "ok");
     } catch (e) { ripMsg(`${f.name}: ${e.message || "file non leggibile"}`, "err"); }
   }
@@ -3501,7 +3507,7 @@ function ripErrori() {
     if (p.some(x => !String(x.nome || "").trim())) e.push(`Una partita dei ${nome} è senza nominativo`);
     if (p.some(x => !Number(x.importo))) e.push(`Una partita dei ${nome} è senza importo`);
     const dopo = ISO(RIP.data) ? p.filter(x => x.data && x.data > RIP.data).length : 0;
-    if (dopo) e.push(`${dopo} ${dopo === 1 ? "partita" : "partite"} dei ${nome} ${dopo === 1 ? "ha" : "hanno"} data successiva alla data dei saldi (${itDate(RIP.data)}): ${dopo === 1 ? "va registrata" : "vanno registrate"} nella nuova contabilità, non riprese`);
+    if (dopo) e.push(`${dopo} ${dopo === 1 ? "partita" : "partite"} dei ${nome} ${dopo === 1 ? "ha" : "hanno"} data successiva alla data dei saldi (${itDate(RIP.data)}): ${dopo === 1 ? "va registrata" : "vanno registrate"} nella nuova contabilità, non riprese. Se è lo scadenzario di Profis dell'anno in corso, caricalo in «Importa la contabilità da Profis» insieme al giornale: allinea le partite aperte`);
   }
   return [...new Set(e)];
 }
@@ -6533,10 +6539,13 @@ function renderDicRE() {
    - registri IVA: registro (Acquisti, Vendite), documento, codice IVA, imponibile, imposta, totale, IVA detraibile;
    - registro dei corrispettivi: registro "Corrispettivi", data, numero, causale ("400-Corr."), codice IVA ("10", "NI90"),
      lordo, imponibile, imposta, totale del documento e conto (ricavo, tassa di soggiorno, cassa): tre righe per giorno.
-     Profis non riporta i corrispettivi nel libro giornale esportato: da questo registro diventano registrazioni CO.
+     Profis non riporta i corrispettivi nel libro giornale esportato: da questo registro diventano registrazioni CO;
+   - scadenzario clienti e fornitori: conto (11.03 / 33.03), codice e nome, riferimento ("Ft 01/2026 26/02/26"), stato
+     ("Ap" partita aperta, "Saldo" incasso o pagamento), importo e residuo. Serve ad allineare le partite aperte della
+     contabilità a quelle di Profis: incassi e pagamenti si spostano sulle fatture che Profis considera pagate.
    I conti di Profis sono quelli del piano S1 o SP_SIS: si riportano con lo stesso codice. Incassi e pagamenti si abbinano
    alle fatture dal riferimento nella descrizione ("Incasso Ft 1  7/01/26"), altrimenti per importo. */
-let PRF = { G: null, IVA: null, C: null, file: {} };
+let PRF = { G: null, IVA: null, C: null, SC: null, file: {} };
 const prfMsg = (t, cls) => { const el = $("#prf-msg"); if (el) { el.textContent = t; el.className = "hint " + (cls || ""); } };
 const prfNorm = s => String(s ?? "").replace(/\s+/g, " ").trim().toUpperCase();
 const prfNum = v => typeof v === "number" ? v : bluNum(v);
@@ -6554,6 +6563,8 @@ function prfTipo(righe) {
   if (v.length >= 3) return "registri";
   const c = righe.filter(r => r && r.length >= 21 && /^corrispettivi$/i.test(String(r[6]).trim()) && /^\d{2}(\.\d{2}){1,3}$/.test(String(r[20]).trim()) && typeof r[18] === "number");
   if (c.length >= 2) return "corrispettivi";
+  const sc = righe.filter(r => r && r.length >= 19 && /^(11|33)\.03\.\d{2}$/.test(String(r[4]).trim()) && /^(ap|saldo|acc|ins|ch|pa)/i.test(String(r[10]).trim()) && typeof r[14] === "number");
+  if (sc.length >= 1 && sc.length >= righe.filter(r => r && r.some(x => x !== "" && x != null)).length * 0.6) return "scadenzario";
   return "";
 }
 function prfLeggiGiornale(righe) {
@@ -6594,6 +6605,18 @@ function prfLeggiCorr(righe) {
     m.set(k, d);
   }
   return [...m.values()].sort((a, b) => a.data.localeCompare(b.data) || (Number(a.num) || 0) - (Number(b.num) || 0));
+}
+/* scadenzario clienti o fornitori: le partite aperte (stato "Ap") con il residuo; le righe "Saldo" sono già scalate */
+function prfLeggiScad(righe) {
+  const out = [];
+  for (const r of righe) {
+    if (!r || r.length < 19 || !/^(11|33)\.03\.\d{2}$/.test(String(r[4]).trim()) || /^saldo/i.test(String(r[10]).trim())) continue;
+    const residuo = r2(prfNum(r.length > 20 && r[20] !== "" && r[20] != null ? r[20] : r[18])); if (Math.abs(residuo) < 0.005) continue;
+    const ref = prfNorm(r[7]), rif = prfRif(ref);
+    out.push({ tipo: /^11/.test(String(r[4]).trim()) ? "C" : "F", an: Number(r[5]) || 0, nome: String(r[6] || "").trim(), ref, num: rif.num, data: rif.data || bluSerial(r[3]),
+      scad: bluSerial(r[8]), prot: String(r[9] ?? "").trim(), tot: r2(prfNum(r[14]) - prfNum(r[15])), residuo });
+  }
+  return out;
 }
 /* righe contabili e IVA di un corrispettivo di Profis: cassa in dare per il totale; ricavi, somme per conto di terzi
    (tassa di soggiorno, codice "NI…" o non imponibile: esclusa ex art. 15) e IVA in avere */
@@ -6646,7 +6669,7 @@ function prfCausale(R) {
   return "GEN";
 }
 function prfAnalizza() {
-  if (!PRF.G && !PRF.C) return null;
+  if (!PRF.G && !PRF.C) return null;   // con i soli scadenzari non c'è niente da analizzare
   const G = PRF.G || [], C = PRF.C || [];
   const anni = new Map(); for (const R of [...G, ...C]) { const y = R.data.slice(0, 4); anni.set(y, (anni.get(y) || 0) + 1); }
   const conti = new Map();
@@ -6667,7 +6690,8 @@ function prfAnalizza() {
 function prfErrori(A) {
   const e = [];
   if (!aziendaCorrente()) e.push("Seleziona l'azienda");
-  if (!PRF.G && !PRF.C) e.push("Manca il libro giornale di Profis");
+  if (!PRF.G && !PRF.C && !PRF.SC) e.push("Manca il libro giornale di Profis");
+  if (!PRF.G && !PRF.C && PRF.SC && !S.regs.some(r => r.partita && !r.generica)) e.push("In contabilità non ci sono fatture da allineare allo scadenzario: importa prima il libro giornale di Profis (anche insieme agli scadenzari)");
   if (A) {
     if (!A.anni.has(String(S.anno))) e.push(`${PRF.G ? "Il giornale" : "Il registro dei corrispettivi"} non contiene registrazioni dell'esercizio ${S.anno}: scegli l'anno giusto in alto`);
     if (A.mancanti.length) e.push(`${A.mancanti.length} conti non presenti nel piano dei conti dell'azienda (${A.mancanti.slice(0, 5).map(c => c.cod).join(", ")}${A.mancanti.length > 5 ? "…" : ""}): aggiungili nel Piano dei conti${aziendaCorrente() && !isProf(aziendaCorrente()) && SEMPL ? " o imposta il tipo di reddito «Lavoro autonomo» se è un professionista" : ""}`);
@@ -6675,13 +6699,135 @@ function prfErrori(A) {
   }
   return e;
 }
+/* ---------- allineamento delle partite aperte allo scadenzario di Profis ----------
+   Per ogni fattura (partita) dell'esercizio fino alla data dello scadenzario: residuo atteso = residuo di Profis se la
+   fattura è nello scadenzario, altrimenti zero (pagata). Incassi e pagamenti dello stesso cliente o fornitore si spostano
+   dalle fatture che risultano pagate in eccesso a quelle che Profis considera pagate; quelli finiti sulle partite generiche
+   al 1° gennaio (documenti non trovati) si usano per primi. Non cambia nessun saldo: solo gli abbinamenti. */
+const prfNumDoc = s => String(s || "").toUpperCase().replace(/\s+/g, "").replace(/(^|[^0-9])0+(?=\d)/g, "$1");
+function prfAllinea(SC, lavoro, anagDi, fino) {
+  const mod = new Set(), via = new Set(), avvisi = [], st = { C: null, F: null };
+  const tocca = r => mod.add(r);
+  for (const t of ["C", "F"]) {
+    const righe = SC[t]; if (!righe) continue;
+    // note di credito: si confrontano con lo scadenzario ma non si spostano incassi e pagamenti
+    const docsTutti = lavoro.filter(r => r.partita?.tipo === t && !r.generica && (!fino || r.dataReg <= fino) && Math.abs(r.partita.totale || 0) >= 0.01);
+    const docs = docsTutti.filter(r => r.partita.totale > 0);
+    const gen = lavoro.filter(r => r.partita?.tipo === t && r.generica && r.fonte === "profis");
+    const genIds = new Set(gen.map(r => r.id)), docIds = new Map(docsTutti.map(r => [r.id, r]));
+    const anagNome = id => anagDi(id)?.denominazione || "";
+    const stessa = (r, x) => { const a = anagDi(r.anagId); return !!a && ((x.an && String(a.codProfis) === String(x.an)) || normNome(a.denominazione) === normNome(x.nome)); };
+    const refDoc = r => String(r.chiave || "").startsWith("PRF|") ? String(r.chiave).split("|")[4] : "";
+    /* 1. righe dello scadenzario → fatture */
+    const atteso = new Map(), presa = new Set(), nonTrovate = [];
+    for (const x of righe) {
+      const libere = docsTutti.filter(r => !presa.has(r.id) && (r.partita.totale < 0) === (x.tot < 0 || x.residuo < 0));
+      const d = libere.find(r => refDoc(r) && refDoc(r) === x.ref && stessa(r, x))
+        || libere.find(r => prfNumDoc(r.numDoc) === prfNumDoc(x.num) && r.dataDoc === x.data && stessa(r, x))
+        || libere.find(r => refDoc(r) && refDoc(r) === x.ref)
+        || libere.find(r => prfNumDoc(r.numDoc) === prfNumDoc(x.num) && r.dataDoc === x.data)
+        || libere.find(r => stessa(r, x) && r.dataDoc === x.data && Math.abs(r.partita.totale - x.tot) < 0.01);
+      if (!d) { nonTrovate.push(x); continue; }
+      presa.add(d.id); atteso.set(d.id, d.partita.totale < 0 ? Math.max(-Math.abs(r2(x.residuo)), d.partita.totale) : Math.min(r2(x.residuo), d.partita.totale));
+    }
+    /* 2. incassi e pagamenti abbinati (ordinaria) o annotati sulle fatture (semplificata) */
+    const unita = [];
+    if (!SEMPL) {
+      for (const R of lavoro) for (const a of R.abbinamenti || []) {
+        if (docIds.has(a.regId)) unita.push({ R, a, an: docIds.get(a.regId).anagId, data: R.dataReg, imp: r2(a.importo) });
+        else if (genIds.has(a.regId)) { const an = R.anagId || (R.righe || []).find(x => x.anagId && /^(11|33)\./.test(x.conto))?.anagId; if (an) unita.push({ R, a, an, data: R.dataReg, imp: r2(a.importo), gen: lavoro.find(g => g.id === a.regId) }); }
+      }
+    } else {
+      for (const d of docsTutti) for (const i of d.incassi || []) unita.push({ d, i, an: d.anagId, data: i.data, imp: r2(i.importo) });
+      for (const g of lavoro) if (g.lordo && g.causale === "GEN" && String(g.chiave || "").endsWith(`|L${t}`) && g.anagId) unita.push({ lordo: g, an: g.anagId, data: g.dataReg, imp: r2((g.righe || []).reduce((s, x) => s + x.dare + x.avere, 0)) });
+    }
+    const suDoc = u => SEMPL ? u.d?.id : (u.gen ? null : u.a.regId);
+    const corrente = id => r2(unita.filter(u => suDoc(u) === id).reduce((s, u) => s + u.imp, 0));
+    let spostati = 0, nDoc = 0, giaOk = 0;
+    const perAn = new Map(); for (const d of docs) { if (!perAn.has(d.anagId)) perAn.set(d.anagId, []); perAn.get(d.anagId).push(d); }
+    const rimasti = [];
+    for (const [an, ds] of perAn) {
+      const pool = [];
+      // fatture pagate più di quanto risulta a Profis: si liberano gli importi in eccesso (dagli ultimi)
+      for (const d of ds) {
+        const serve = r2(d.partita.totale - (atteso.get(d.id) || 0)); let ecc = r2(corrente(d.id) - serve);
+        if (ecc <= 0.004) continue;
+        for (const u of unita.filter(u => suDoc(u) === d.id).sort((a, b) => String(b.data).localeCompare(String(a.data)))) {
+          if (ecc <= 0.004) break;
+          const q = Math.min(u.imp, ecc);
+          const ritQ = SEMPL && u.i.rit ? r2(u.i.rit * q / u.imp) : 0;
+          pool.push({ ...u, imp: r2(q), imp0: r2(q), rit: ritQ, da: d }); u.imp = r2(u.imp - q); ecc = r2(ecc - q);
+          if (SEMPL) { u.i.importo = u.imp; if (ritQ) u.i.rit = r2(u.i.rit - ritQ); tocca(u.d); }
+          else { u.a.importo = u.imp; tocca(u.R); }
+        }
+      }
+      // partite generiche dello stesso nominativo
+      for (const u of unita.filter(u => u.an === an && (u.gen || u.lordo) && u.imp > 0.004)) pool.push({ ...u, orig: u });
+      // fatture che risultano pagate a Profis ma con incassi o pagamenti mancanti
+      for (const d of ds.slice().sort((a, b) => String(a.dataDoc).localeCompare(String(b.dataDoc)))) {
+        const serve = r2(d.partita.totale - (atteso.get(d.id) || 0)); let manca = r2(serve - corrente(d.id));
+        if (Math.abs(r2(corrente(d.id) - serve)) < 0.01 && !pool.some(p => p.da === d)) { giaOk++; continue; }
+        if (manca <= 0.004) continue;
+        nDoc++;
+        const esatto = pool.findIndex(p => p.imp > 0.004 && Math.abs(p.imp - manca) < 0.005);
+        const ordine = esatto >= 0 ? [pool[esatto]] : pool.filter(p => p.imp > 0.004).sort((a, b) => (a.data >= d.dataDoc ? 0 : 1) - (b.data >= d.dataDoc ? 0 : 1) || String(a.data).localeCompare(String(b.data)));
+        for (const p of ordine) {
+          if (manca <= 0.004) break;
+          const q = r2(Math.min(p.imp, manca)); if (q <= 0.004) continue;
+          p.imp = r2(p.imp - q); manca = r2(manca - q); spostati = r2(spostati + q);
+          if (SEMPL) {
+            const base = p.i || { data: p.lordo.dataReg, rit: 0, conto: "", descr: p.lordo.descr.replace(/:.*$/, ""), chiave: p.lordo.chiave, creato: new Date().toISOString() };
+            const nuovo = { ...base, importo: q, rit: p.rit ? r2(p.rit * q / p.imp0) : 0, chiave: `${base.chiave || ""}|S${d.id}` };
+            d.incassi = (d.incassi || []).concat([nuovo]); tocca(d);
+            unita.push({ d, i: nuovo, an, data: nuovo.data, imp: q });
+            if (p.lordo) { p.orig.imp = r2(p.orig.imp - q); const x = p.lordo.righe[0]; if (x.dare) x.dare = r2(x.dare - q); else x.avere = r2(x.avere - q); if (Math.abs(x.dare) + Math.abs(x.avere) < 0.005) via.add(p.lordo); else tocca(p.lordo); }
+          } else {
+            const R = p.R, ex = R.abbinamenti.find(a => a.regId === d.id);
+            if (ex) ex.importo = r2(ex.importo + q); else R.abbinamenti.push({ regId: d.id, importo: q });
+            unita.push({ R, a: ex || R.abbinamenti[R.abbinamenti.length - 1], an, data: R.dataReg, imp: q });
+            if (p.gen) {
+              p.orig.imp = r2(p.orig.imp - q); p.orig.a.importo = p.orig.imp;
+              const g = p.gen; g.partita.totale = r2(g.partita.totale - q);
+              for (const x of g.righe) { if (x.dare) x.dare = r2(x.dare - q); else x.avere = r2(x.avere - q); }
+              if (g.partita.totale < 0.005) via.add(g); else tocca(g);
+            }
+            tocca(R);
+          }
+        }
+      }
+      for (const p of pool) if (p.imp > 0.004 && p.da) rimasti.push(p);
+    }
+    /* 3. importi liberati senza un'altra fattura da pagare: sulla partita generica al 1° gennaio, se c'è, altrimenti tornano dove erano */
+    for (const p of rimasti) {
+      const g = !SEMPL && gen.find(g => !via.has(g));
+      if (g) {
+        g.partita.totale = r2(g.partita.totale + p.imp);
+        const cAn = g.righe.find(x => x.anagId), cRip = g.righe.find(x => !x.anagId);
+        if (t === "C") { cAn.dare = r2(cAn.dare + p.imp); cRip.avere = r2(cRip.avere + p.imp); } else { cAn.avere = r2(cAn.avere + p.imp); cRip.dare = r2(cRip.dare + p.imp); }
+        const ex = p.R.abbinamenti.find(a => a.regId === g.id); if (ex) ex.importo = r2(ex.importo + p.imp); else p.R.abbinamenti.push({ regId: g.id, importo: p.imp });
+        tocca(g); tocca(p.R);
+      } else if (SEMPL) { p.i.importo = r2((p.i.importo || 0) + p.imp); if (p.rit) p.i.rit = r2((p.i.rit || 0) + p.rit * p.imp / p.imp0); tocca(p.d); }
+      else { p.a.importo = r2(p.a.importo + p.imp); tocca(p.R); }
+    }
+    for (const R of mod) if (R.abbinamenti) R.abbinamenti = R.abbinamenti.filter(a => a.importo > 0.004);
+    for (const d of docs) if (d.incassi) d.incassi = d.incassi.filter(i => i.importo > 0.004);
+    /* 4. differenze che restano */
+    const diverse = docsTutti.filter(d => Math.abs(r2(d.partita.totale - corrente(d.id)) - (atteso.get(d.id) || 0)) >= 0.01);
+    st[t] = { righe: righe.length, trovate: presa.size, nonTrovate, spostati, nDoc, diverse: diverse.map(d => ({ d, nome: anagNome(d.anagId), res: r2(d.partita.totale - corrente(d.id)), att: atteso.get(d.id) || 0 })) };
+    if (nonTrovate.length) avvisi.push(`${nonTrovate.length} ${t === "C" ? (nonTrovate.length === 1 ? "fattura di cliente aperta" : "fatture di clienti aperte") : (nonTrovate.length === 1 ? "fattura di fornitore aperta" : "fatture di fornitori aperte")} nello scadenzario ${nonTrovate.length === 1 ? "non è" : "non sono"} in contabilità (${nonTrovate.slice(0, 3).map(x => `${x.nome} ${x.ref}`).join("; ")}${nonTrovate.length > 3 ? "…" : ""})`);
+    if (diverse.length) avvisi.push(`${diverse.length} ${t === "C" ? (diverse.length === 1 ? "fattura di cliente ha" : "fatture di clienti hanno") : (diverse.length === 1 ? "fattura di fornitore ha" : "fatture di fornitori hanno")} un residuo diverso da Profis perché mancano incassi o pagamenti dello stesso nominativo (${st[t].diverse.slice(0, 3).map(x => `${x.nome} ${x.d.numDoc}: ${num(x.res)} € invece di ${num(x.att)} €`).join("; ")}${diverse.length > 3 ? "…" : ""})`);
+  }
+  for (const g of via) mod.delete(g);
+  return { mod, via, avvisi, st };
+}
 let prfInCorso = false, prfElimina = false;
 function renderPrf() {
   const box = $("#prf-card"); if (!box) return;
   const A = prfAnalizza(), err = prfErrori(A), righe = [];
   const f = PRF.file;
-  righe.push(`<div><span>Libro giornale (prima nota)${f.C ? "" : ` <span class="pill media">necessario</span>`}</span><span class="mono">${f.G ? `${esc(f.G.nome)} · ${f.G.n} registrazioni` : f.C ? "non caricato: si importano solo i corrispettivi" : "–"}</span></div>`);
+  righe.push(`<div><span>Libro giornale (prima nota)${f.C || PRF.SC ? "" : ` <span class="pill media">necessario</span>`}</span><span class="mono">${f.G ? `${esc(f.G.nome)} · ${f.G.n} registrazioni` : f.C ? "non caricato: si importano solo i corrispettivi" : PRF.SC ? "non caricato: si allineano le partite già in contabilità" : "–"}</span></div>`);
   righe.push(`<div><span>Registri IVA</span><span class="mono">${f.IVA ? `${esc(f.IVA.nome)} · ${f.IVA.n} documenti` : "facoltativi: senza, le registrazioni non entrano nei registri IVA"}</span></div>`);
+  righe.push(`<div><span>Scadenzari clienti e fornitori</span><span class="mono">${PRF.SC ? ["C", "F"].filter(t => PRF.SC[t]).map(t => `${t === "C" ? "clienti" : "fornitori"}: ${PRF.SC[t].length} partite aperte per ${num(PRF.SC[t].reduce((s, x) => s + x.residuo, 0))} €`).join(" · ") : "facoltativi: allineano le partite aperte a quelle di Profis"}</span></div>`);
   righe.push(`<div><span>Registro dei corrispettivi</span><span class="mono">${f.C ? `${esc(f.C.nome)} · ${f.C.n} giornate · ${num(A?.totCorr || 0)} €` : "facoltativo: Profis non mette i corrispettivi nel giornale esportato"}</span></div>`);
   if (A) {
     righe.push(`<div><span>${esc(A.ditta)} · registrazioni dal ${itDate(A.prima)} al ${itDate(A.ultima)}</span><span class="mono">${[...A.cau].map(([c, n]) => `${esc(CAUSALI[c] || c)} ${n}`).join(" · ")}</span></div>`);
@@ -6690,7 +6836,7 @@ function renderPrf() {
   }
   const imp = aziendaCorrente()?.importProfis;
   if (imp && !A) righe.push(`<div><span>Ultima importazione: ${imp.n} registrazioni fino al ${itDate(imp.data)} (${esc(imp.file || "Profis")})</span><span><button class="btn small" id="prf-elimina" type="button">${prfElimina ? "Conferma: elimina le registrazioni importate" : "Elimina l'importazione"}</button></span></div>`);
-  if (A || PRF.IVA) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">Pronto per l'importazione nell'esercizio ${S.anno}</span><span></span></div>`);
+  if (A || PRF.IVA || PRF.SC) righe.push(err.length ? `<div><span class="err">Da sistemare: ${esc(err.join("; "))}</span><span></span></div>` : `<div><span class="ok">${A ? `Pronto per l'importazione nell'esercizio ${S.anno}` : `Pronto per allineare le partite aperte dell'esercizio ${S.anno} allo scadenzario di Profis`}</span><span></span></div>`);
   $("#prf-riepilogo").innerHTML = righe.join("");
   $("#prf-importa").disabled = !!err.length || prfInCorso;
 }
@@ -6703,8 +6849,14 @@ async function prfCarica(files) {
       const { righe } = await bluFoglio(f), t = prfTipo(righe);
       if (t === "giornale") { PRF.G = prfLeggiGiornale(righe); PRF.file.G = { nome: f.name, n: PRF.G.length }; letti.push(`${f.name}: libro giornale, ${PRF.G.length} registrazioni`); }
       else if (t === "registri") { PRF.IVA = prfLeggiRegistri(righe); PRF.file.IVA = { nome: f.name, n: PRF.IVA.size }; letti.push(`${f.name}: registri IVA, ${PRF.IVA.size} documenti`); }
+      else if (t === "scadenzario") {
+        const sc = prfLeggiScad(righe), tipi = [...new Set(righe.filter(r => r && /^(11|33)\.03\.\d{2}$/.test(String(r[4]).trim())).map(r => /^11/.test(String(r[4]).trim()) ? "C" : "F"))];
+        PRF.SC = PRF.SC || {}; for (const t of tipi) PRF.SC[t] = sc.filter(x => x.tipo === t);
+        PRF.file.SC = (PRF.file.SC ? PRF.file.SC + ", " : "") + f.name;
+        letti.push(`${f.name}: scadenzario ${tipi.map(t => t === "C" ? "clienti" : "fornitori").join(" e ")}, ${sc.length} partite aperte per ${num(sc.reduce((s, x) => s + x.residuo, 0))} €`);
+      }
       else if (t === "corrispettivi") { PRF.C = prfLeggiCorr(righe); PRF.file.C = { nome: f.name, n: PRF.C.length }; letti.push(`${f.name}: registro dei corrispettivi, ${PRF.C.length} giornate per ${num(PRF.C.reduce((s, d) => s + d.tot, 0))} €`); }
-      else letti.push(`${f.name}: non è un libro giornale né un registro IVA o dei corrispettivi esportato da Profis`);
+      else letti.push(`${f.name}: non è un libro giornale, un registro IVA o dei corrispettivi né uno scadenzario esportato da Profis`);
     } catch (e) { letti.push(`${f.name}: ${e.message || "file non leggibile"}`); }
   }
   renderPrf();
@@ -6718,14 +6870,14 @@ async function prfImporta() {
   try {
     const G = (PRF.G || []).filter(R => R.data.slice(0, 4) === Y), CO = (PRF.C || []).filter(R => R.data.slice(0, 4) === Y);
     /* 0. conti mancanti nel piano dell'azienda */
-    for (const c of A.creabili) {
+    for (const c of A?.creabili || []) {
       const b = c.base, p = c.padre, eco = /^(4[7-9]|[5-8]\d)\./.test(c.cod), ric = /^(47|53|73|77)\./.test(c.cod);
       const o = { id: `${S.aziendaId}~${c.cod}`, scope: S.aziendaId, codice: c.cod, d: c.d || b?.d || c.cod, t: b?.t || (eco ? "E" : "P"), s: b?.s || (eco ? (ric ? "R" : "C") : p.s || "X"),
         vd: b?.vd || p.vd || "", va: b?.va || p.va || "", ded: b?.ded ?? (eco && !ric ? "100" : ""), fis: b?.fis ?? (eco && !ric ? "Deducibile secondo le regole ordinarie" : ""), eliminato: false, aggiornato: adesso, fonte: "profis" };
       await store.put("pdc", o);
       if (!S.pdcOv.some(x => x.id === o.id)) S.pdcOv.push(o);
     }
-    if (A.creabili.length) ricostruisciPdc();
+    if (A?.creabili.length) ricostruisciPdc();
     /* 1. anagrafiche */
     const anag = new Map();   // "C|codice" → anagrafica
     for (const R of G) for (const x of R.righe) {
@@ -6832,7 +6984,7 @@ async function prfImporta() {
       for (const r of regs) for (const l of r._libero || []) {
         const c = l.tipo === "C" ? foglia(az.contoRicavi || K.ricServizi) : foglia(az.contoCosti || K.costoGen);
         regsApe.push(nuovaReg({ id: uid(), causale: "GEN", dataReg: r.dataReg, dataDoc: r.dataReg, numDoc: "", descr: `${l.tipo === "C" ? "Incasso" : "Pagamento"} di documento non presente nel giornale (anno precedente): importo lordo da verificare${r.anagNome ? ` · ${r.anagNome}` : ""}`,
-          righe: [riga(c, l.tipo === "C" ? 0 : l.imp, l.tipo === "C" ? l.imp : 0)], soloCE: true, lordo: true, chiave: `${r.chiave}|L${l.tipo}` }));
+          righe: [riga(c, l.tipo === "C" ? 0 : l.imp, l.tipo === "C" ? l.imp : 0)], soloCE: true, lordo: true, chiave: `${r.chiave}|L${l.tipo}`, ...(r.anagId ? { anagId: r.anagId, anagNome: r.anagNome } : {}) }));
       }
       liberi.C = liberi.F = 0;
     }
@@ -6848,16 +7000,42 @@ async function prfImporta() {
       for (const r of regs) for (const l of r._libero || []) if (l.tipo === t) { r.abbinamenti.push({ regId: ap.id, importo: l.imp }); nAbb++; }
     }
     for (const r of regs) { delete r._libero; delete r._R; }
+    /* 4-bis. allineamento delle partite aperte allo scadenzario di Profis */
+    let all = null; const eliminare = new Set();
+    if (PRF.SC) {
+      msg("Allineamento delle partite allo scadenzario…");
+      // copie delle registrazioni già salvate (si modificano solo gli abbinamenti), più quelle nuove
+      const salvate = S.regs.filter(r => r.partita || (r.abbinamenti || []).length || r.lordo).map(r => JSON.parse(JSON.stringify(r)));
+      const nuove = regsApe.concat(regs), lavoro = salvate.concat(nuove);
+      const nuoveAn = new Map(out.filter(([c]) => c === "anagrafiche").map(([, a]) => [a.id, a]));
+      const anagDi = id => nuoveAn.get(id) || S.anag.find(a => a.id === id);
+      const scDate = Object.values(PRF.SC).flat().map(x => x.data).filter(Boolean);
+      const fino = [az.importProfis?.data || "", A?.ultima || "", ...scDate].reduce((m, d) => d > m ? d : m, "");
+      all = prfAllinea(PRF.SC, lavoro, anagDi, fino);
+      const nuoveId = new Set(nuove.map(r => r.id));
+      for (const r of all.mod) if (!nuoveId.has(r.id)) { modificati.delete([...modificati].find(x => x.id === r.id)); modificati.add(r); }
+      for (const r of all.via) { if (nuoveId.has(r.id)) { const i = regsApe.indexOf(r); if (i >= 0) regsApe.splice(i, 1); const j = regs.indexOf(r); if (j >= 0) regs.splice(j, 1); } else eliminare.add(r.id); }
+      for (const r of modificati) if (all.via.has(r)) modificati.delete(r);
+      avvisi.push(...all.avvisi);
+    }
     /* 5. scrittura */
     // contabilità semplificata: incassi, pagamenti e giroconti senza costi né ricavi non si registrano
     const scartate = SEMPL ? regs.filter(r => !r.righe.length) : [];
     const tutte = regsApe.concat(regs.filter(r => !scartate.includes(r))).concat([...modificati]);
     for (const r of tutte) { const e = erroriReg(r); if (e.length) throw new Error(`${r.descr} del ${itDate(r.dataReg)}: ${e[0]}`); }
-    if (!tutte.length && !out.length) { msg(""); prfMsg(`Niente da importare: ${gia.length + corrGia} registrazioni erano già in contabilità.`, "ok"); PRF = { G: null, IVA: null, C: null, file: {} }; return; }
+    if (!tutte.length && !out.length && !eliminare.size) { msg(""); prfMsg(PRF.SC && !A ? `Le partite aperte coincidono già con lo scadenzario di Profis${avvisi.length ? `. Da controllare: ${avvisi.join("; ")}` : ""}.` : `Niente da importare: ${gia.length + corrGia} registrazioni erano già in contabilità.`, PRF.SC && avvisi.length ? "work" : "ok"); PRF = { G: null, IVA: null, C: null, SC: null, file: {} }; return; }
     for (const r of tutte) out.push(["registrazioni", r]);
     msg(`Salvataggio di ${out.length} documenti…`);
     await bluScrivi(out, (i, n) => msg(`Salvataggio… ${i} di ${n}`));
+    if (eliminare.size) await bluElimina(eliminare);
     if (!S.db && tutte.length && !lsLoad().registrazioni.some(r => r.id === tutte[tutte.length - 1].id)) throw new Error("lo spazio del browser non basta per salvare tutte le registrazioni: apri la contabilità dentro Claude o dal portale con l'archivio condiviso");
+    const testoAll = all ? ["C", "F"].filter(t => all.st[t]).map(t => { const x = all.st[t]; return `scadenzario ${t === "C" ? "clienti" : "fornitori"}: ${x.trovate} di ${x.righe} partite aperte ritrovate${x.spostati ? `, ${num(x.spostati)} € di ${t === "C" ? "incassi" : "pagamenti"} spostati su ${x.nDoc} ${x.nDoc === 1 ? "fattura pagata" : "fatture pagate"} secondo Profis` : ""}${!x.diverse.length && !x.nonTrovate.length ? ", tutto coincide" : ""}`; }).join("; ") : "";
+    if (!A) {
+      log("Scadenzario Profis", testoAll, avvisi.length ? "work" : "ok");
+      PRF = { G: null, IVA: null, C: null, SC: null, file: {} }; renderPrf(); msg("");
+      prfMsg(`Partite aperte allineate allo scadenzario di Profis (${testoAll}); ${tutte.length + eliminare.size} registrazioni aggiornate.${avvisi.length ? ` Da controllare: ${avvisi.join("; ")}.` : ""}`, avvisi.length ? "work" : "ok");
+      return;
+    }
     // più importazioni (giornale e poi corrispettivi): si tengono tutte per poterle eliminare insieme
     const prec = aziendaCorrente().importProfis, ids = [...new Set([...(prec?.ids || (prec?.id ? [prec.id] : [])), rid])];
     const azN = { ...aziendaCorrente(), importProfis: { id: rid, ids, data: prec?.data > A.ultima ? prec.data : A.ultima, n: (prec ? prec.n || 0 : 0) + tutte.length, anno, file: [prec?.file, PRF.file.G?.nome || PRF.file.C?.nome].filter(Boolean).join(" + "), creato: adesso } };
@@ -6865,8 +7043,8 @@ async function prfImporta() {
     if (!G.some(R => R.righe.some(x => x.cod === K.ivaAcq && x.dare > 0)) && G.some(R => prfCausale(R) === "FR")) azN.detrazione = 0;
     await store.put("aziende", azN);
     log("Importazione Profis", `${regs.length} registrazioni, ${anag.size} clienti e fornitori, ${nAbb} abbinamenti`, "ok");
-    PRF = { G: null, IVA: null, C: null, file: {} }; renderPrf(); msg("");
-    prfMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(A.ultima)}${SEMPL ? ` con i soli costi e ricavi (${scartate.length} incassi, pagamenti e giroconti annotati sui documenti o senza costi e ricavi)` : ""}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti ${SEMPL ? "annotati sulle" : "abbinati alle"} fatture${perImporto ? ` (${perImporto} per importo, perché il riferimento nella descrizione non corrispondeva)` : ""}${liberi.C + liberi.F ? `; ${num(liberi.C)} € di incassi e ${num(liberi.F)} € di pagamenti di documenti di anni precedenti su partite generiche al 1° gennaio` : ""}${nIva ? `; ${nIva} documenti nei registri IVA` : ""}${senzaIva ? `, ${senzaIva} senza righe IVA` : ""}${nCorr ? `; ${nCorr} corrispettivi giornalieri dal registro di Profis` : ""}${corrGia ? ` (${corrGia} giornate erano già in contabilità e non sono state ripetute)` : ""}${gia.length ? `; ${gia.length} registrazioni erano già state importate` : ""}${avvisi.length ? `. Da controllare: ${avvisi.slice(0, 3).join("; ")}` : ""}.`, "ok");
+    PRF = { G: null, IVA: null, C: null, SC: null, file: {} }; renderPrf(); msg("");
+    prfMsg(`Importazione completata: ${tutte.length} registrazioni fino al ${itDate(A.ultima)}${SEMPL ? ` con i soli costi e ricavi (${scartate.length} incassi, pagamenti e giroconti annotati sui documenti o senza costi e ricavi)` : ""}, ${anag.size} clienti e fornitori, ${nAbb} incassi e pagamenti ${SEMPL ? "annotati sulle" : "abbinati alle"} fatture${perImporto ? ` (${perImporto} per importo, perché il riferimento nella descrizione non corrispondeva)` : ""}${liberi.C + liberi.F ? `; ${num(liberi.C)} € di incassi e ${num(liberi.F)} € di pagamenti di documenti di anni precedenti su partite generiche al 1° gennaio` : ""}${nIva ? `; ${nIva} documenti nei registri IVA` : ""}${senzaIva ? `, ${senzaIva} senza righe IVA` : ""}${nCorr ? `; ${nCorr} corrispettivi giornalieri dal registro di Profis` : ""}${testoAll ? `; ${testoAll}` : ""}${corrGia ? ` (${corrGia} giornate erano già in contabilità e non sono state ripetute)` : ""}${gia.length ? `; ${gia.length} registrazioni erano già state importate` : ""}${avvisi.length ? `. Da controllare: ${avvisi.slice(0, 3).join("; ")}` : ""}.`, "ok");
   } catch (e) {
     msg(""); prfMsg(`Importazione non riuscita: ${e.message || e}`, "err");
   } finally { prfInCorso = false; renderPrf(); }
@@ -6879,7 +7057,7 @@ async function prfImporta() {
   ["dragleave", "drop"].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.remove("over"); }));
   d.addEventListener("drop", e => { const f = [...(e.dataTransfer?.files || [])]; if (f.length) prfCarica(f); });
   inp.addEventListener("change", () => { const f = [...inp.files]; inp.value = ""; if (f.length) prfCarica(f); });
-  $("#prf-svuota").addEventListener("click", () => { PRF = { G: null, IVA: null, C: null, file: {} }; renderPrf(); prfMsg(""); });
+  $("#prf-svuota").addEventListener("click", () => { PRF = { G: null, IVA: null, C: null, SC: null, file: {} }; renderPrf(); prfMsg(""); });
   $("#prf-importa").addEventListener("click", prfImporta);
   $("#prf-riepilogo").addEventListener("click", async e => {
     if (!e.target.closest("#prf-elimina")) return;
