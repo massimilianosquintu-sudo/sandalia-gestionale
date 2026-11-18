@@ -4388,7 +4388,10 @@ function contiCassaBanca(az, senzaCassa) {
   const add = c => { if (c && !ha(c) && c !== K.banca && c !== K.cassa && contoOk(c)) out.push([c, `${c} · ${descConto(c)}`]); };
   for (const o of S.pdcOv || []) if (o.scope === S.aziendaId && !o.eliminato && RE_LIQUIDI.test(o.codice || "")) add(o.codice);
   for (const r of S.regs) for (const x of r.righe || []) if (RE_LIQUIDI.test(x.conto || "")) add(x.conto);
-  if (!ha(K.banca)) out.push([K.banca, `${K.banca} · Banca c/c (generico)`]);
+  // conto generico: se nel piano dei conti ha dei sottoconti (es. 19.01.01.92) non si può più usare; resta in elenco
+  // per la riconciliazione solo se ha ancora movimenti, da spostare sul sottoconto
+  const genOk = contoOk(K.banca), genMov = !genOk && S.regs.some(r => (r.righe || []).some(x => x.conto === K.banca));
+  if (!ha(K.banca) && (genOk || (genMov && !senzaCassa))) out.push([K.banca, genOk ? `${K.banca} · Banca c/c (generico)` : `${K.banca} · Banca c/c (ha dei sottoconti: sposta i movimenti)`]);
   if (!senzaCassa && !ha(K.cassa)) out.push([K.cassa, `${K.cassa} · Cassa contanti`]);
   return senzaCassa ? out.filter(x => !/^19\.03\./.test(x[0])) : out;
 }
@@ -5796,7 +5799,9 @@ function bluCalcola() {
   const indice = (() => { const n = indiceDescrizioni(); return n; })();
   for (const x of conti.values()) {
     if (BLU.mappa[x.cod] && contoOk(BLU.mappa[x.cod])) continue;
-    const da = [[salv[x.cod], "salvata"], [az?.mappaBlustring?.[x.cod], "salvata"], [BLU_S1[x.cod], "tabella"], [DESC_IDX.get(indice(x.d)), "descrizione"]].find(([c]) => c && contoOk(c));
+    // conto della tabella diventato mastro nel piano dell'azienda (es. 19.01.01 con il sottoconto 19.01.01.92): il suo unico sottoconto
+    const figlio = c => { if (!c || contoOk(c)) return c; const f = [...PDC.keys()].filter(k => k.startsWith(c + ".") && contoOk(k)); return f.length === 1 ? f[0] : null; };
+    const da = [[salv[x.cod], "salvata"], [az?.mappaBlustring?.[x.cod], "salvata"], [figlio(BLU_S1[x.cod]), "tabella"], [DESC_IDX.get(indice(x.d)), "descrizione"]].find(([c]) => c && contoOk(c));
     if (da) { BLU.mappa[x.cod] = da[0]; BLU.fonteMappa[x.cod] = da[1]; }
     else if (x.cod === BLU_CLI) { BLU.mappa[x.cod] = K.clienti; BLU.fonteMappa[x.cod] = "tabella"; }
     else if (x.cod === BLU_FOR) { BLU.mappa[x.cod] = K.fornitori; BLU.fonteMappa[x.cod] = "tabella"; }
