@@ -467,6 +467,11 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
         </div>
         <div class="row"><button type="button" class="btn small pri" id="ban-salva">Salva il saldo</button><span class="hint" id="ban-msg" role="status"></span></div>
         <div class="lm" id="ban-prosp"></div>
+        <details class="sub-det" style="margin-top:10px"><summary>Sposta i movimenti su un altro conto</summary>
+          <p class="note">Per esempio dal conto generico 19.01.01 al conto bancario dedicato aggiunto nel piano dei conti o nella scheda Azienda. Si spostano tutte le righe del conto scelto sopra nelle registrazioni dell'esercizio, compresa la riapertura al 1° gennaio; i saldi complessivi non cambiano.</p>
+          <div class="formgrid"><label class="fld" for="ban-sposta">Nuovo conto<select id="ban-sposta"></select></label></div>
+          <div class="row"><button type="button" class="btn small" id="ban-sposta-btn">Sposta i movimenti</button><span class="hint" id="ban-sposta-n"></span></div>
+        </details>
       </div>
       <div class="card">
         <h2>Confronta con l'estratto conto</h2>
@@ -2310,7 +2315,7 @@ function renderSelettori() {
     az.stato === "liquidazione" ? `<span class="chip warn">In liquidazione</span>` : ""
   ].join("") : `<span class="chip">Nessuna azienda</span>`;
   const sb = $("#sel-banca"), cur = sb.value;
-  const banche = [...(az?.banche || []).map(b => [b.codice, `${b.codice} · ${b.nome}`]), [K.banca, `${K.banca} · Banca c/c (generico)`]];
+  const banche = contiCassaBanca(az, true);
   sb.innerHTML = banche.map(([c, l]) => `<option value="${esc(c)}">${esc(l)}</option>`).join("");
   if (banche.some(b => b[0] === cur)) sb.value = cur;
   const pm = $("#pn-mese");
@@ -4369,11 +4374,17 @@ function giorniTra(a, b) { return Math.round((Date.parse(b + "T12:00:00") - Date
 function lavorativo(iso) { const d = new Date(iso + "T12:00:00"); const g = d.getDay(); if (g === 6) d.setDate(d.getDate() + 2); else if (g === 0) d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
 const fineMese = (y, m) => `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
 const dmy2iso = s => { const m = String(s || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
-function contiCassaBanca(az) {
-  const out = [...(az?.banche || []).map(b => [b.codice, `${b.codice} · ${b.nome}`])];
-  if (!out.some(x => x[0] === K.banca)) out.push([K.banca, `${K.banca} · Banca c/c (generico)`]);
-  out.push([K.cassa, `${K.cassa} · Cassa contanti`]);
-  return out;
+/* conti di banca, posta e cassa: quelli della scheda Azienda, quelli aggiunti nel piano dei conti dell'azienda (19.01…19.05)
+   e quelli già movimentati nell'esercizio; poi il conto generico e la cassa */
+const RE_LIQUIDI = /^19\.0[1-5]\./;
+function contiCassaBanca(az, senzaCassa) {
+  const out = [...(az?.banche || []).map(b => [b.codice, `${b.codice} · ${b.nome}`])], ha = c => out.some(x => x[0] === c);
+  const add = c => { if (c && !ha(c) && c !== K.banca && c !== K.cassa && contoOk(c)) out.push([c, `${c} · ${descConto(c)}`]); };
+  for (const o of S.pdcOv || []) if (o.scope === S.aziendaId && !o.eliminato && RE_LIQUIDI.test(o.codice || "")) add(o.codice);
+  for (const r of S.regs) for (const x of r.righe || []) if (RE_LIQUIDI.test(x.conto || "")) add(x.conto);
+  if (!ha(K.banca)) out.push([K.banca, `${K.banca} · Banca c/c (generico)`]);
+  if (!senzaCassa && !ha(K.cassa)) out.push([K.cassa, `${K.cassa} · Cassa contanti`]);
+  return senzaCassa ? out.filter(x => !/^19\.03\./.test(x[0])) : out;
 }
 function opzioniConti(sel, cur) { const az = aziendaCorrente(), l = contiCassaBanca(az); sel.innerHTML = l.map(([c, t]) => `<option value="${esc(c)}">${esc(t)}</option>`).join(""); if (l.some(x => x[0] === cur)) sel.value = cur; }
 async function salvaAzienda(patch) { const az = aziendaCorrente(); if (!az) return; const n = { ...az, ...patch }; await store.put("aziende", n); Object.assign(az, n); }
@@ -4500,8 +4511,10 @@ function movConto(c, al) {
 const spuntato = (r, c) => !!(r.spunta && r.spunta[c]);
 function renderBan() {
   const az = aziendaCorrente(), sel = $("#ban-conto");
-  opzioniConti(sel, sel.value || (az?.banche?.[0]?.codice || K.banca));
+  opzioniConti(sel, sel.value || (az?.banche?.[0]?.codice || contiCassaBanca(az).find(x => x[0] !== K.banca && x[0] !== K.cassa)?.[0] || K.banca));
   const c = sel.value;
+  // conto di destinazione per spostare i movimenti (per esempio dal conto generico 19.01.01 al conto dedicato)
+  { const ss = $("#ban-sposta"); if (ss) { const cur = ss.value, l = contiCassaBanca(az).filter(x => x[0] !== c); ss.innerHTML = l.map(([k, t]) => `<option value="${esc(k)}">${esc(t)}</option>`).join(""); if (l.some(x => x[0] === cur)) ss.value = cur; const n = S.regs.filter(r => (r.righe || []).some(x => x.conto === c)).length; $("#ban-sposta-n").textContent = n ? `${n} registrazioni sul conto ${c}` : "nessun movimento su questo conto"; $("#ban-sposta-btn").disabled = !n || !l.length; } }
   if (!$("#ban-al").value || $("#ban-al").value.slice(0, 4) !== String(S.anno)) $("#ban-al").value = S.anno === new Date().getFullYear() ? today() : `${S.anno}-12-31`;
   const al = $("#ban-al").value, ric = (az?.riconc || {})[c];
   if (document.activeElement !== $("#ban-saldo")) $("#ban-saldo").value = ric && ric.data === al ? num(ric.saldo) : "";
@@ -4531,6 +4544,31 @@ function renderBan() {
 async function spunta(r, c, v) { const sp = { ...(r.spunta || {}) }; if (v) sp[c] = today(); else delete sp[c]; const n = { ...r, spunta: sp }; await store.put("registrazioni", n); Object.assign(r, n); }
 ["#ban-conto", "#ban-al", "#ban-filtro"].forEach(s => $(s).addEventListener("change", () => { $("#ban-esito").innerHTML = ""; renderBan(); }));
 $("#ban-saldo").addEventListener("change", renderBan);
+let banSpostaOk = null;
+$("#ban-sposta").addEventListener("change", () => { banSpostaOk = null; $("#ban-sposta-btn").textContent = "Sposta i movimenti"; });
+$("#ban-sposta-btn").addEventListener("click", async () => {
+  const da = $("#ban-conto").value, a = $("#ban-sposta").value, b = $("#ban-sposta-btn");
+  if (!da || !a || da === a || !contoOk(a)) return;
+  const regs = S.regs.filter(r => (r.righe || []).some(x => x.conto === da));
+  if (!regs.length) return;
+  if (banSpostaOk !== `${da}>${a}`) { banSpostaOk = `${da}>${a}`; b.textContent = `Conferma: sposta ${regs.length} registrazioni da ${da} a ${a}`; return; }
+  banSpostaOk = null; b.disabled = true; b.textContent = "Spostamento…";
+  try {
+    const out = regs.map(r => {
+      const n = { ...r, righe: r.righe.map(x => x.conto === da ? { ...x, conto: a } : x) };
+      if (r.mov?.conto === da) n.mov = { ...r.mov, conto: a };
+      if (r.spunta && r.spunta[da]) { n.spunta = { ...r.spunta, [a]: r.spunta[da] }; delete n.spunta[da]; }
+      return ["registrazioni", n];
+    });
+    await bluScrivi(out, () => {});
+    const az = aziendaCorrente();
+    if (az?.riconc?.[da] && !az.riconc[a]) { const rc = { ...az.riconc, [a]: az.riconc[da] }; delete rc[da]; await salvaAzienda({ riconc: rc }); }
+    log("Banche", `${regs.length} registrazioni spostate dal conto ${da} al conto ${a}`, "ok");
+    $("#ban-msg").textContent = `${regs.length} registrazioni spostate dal conto ${da} al conto ${a}.`;
+    $("#ban-conto").value = a;
+  } catch (e) { $("#ban-msg").textContent = `Spostamento non riuscito: ${e.message || e}`; }
+  b.textContent = "Sposta i movimenti"; renderBan();
+});
 $("#ban-body").addEventListener("change", async e => {
   if (!e.target.matches("[data-spunta]")) return;
   const r = S.regs.find(x => x.id === e.target.closest("tr").dataset.banId); if (!r) return;
