@@ -266,6 +266,7 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
       <button class="tab" role="tab" data-tab="acq" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5 5h14l2 8v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z"/></svg><span class="lbl">Acquisizione</span><span class="count" id="cnt-coda" hidden></span></button>
       <button class="tab" role="tab" data-tab="pn" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M9 8h6"/></svg><span class="lbl">Prima nota</span></button>
       <button class="tab" role="tab" data-tab="par" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A4.5 4.5 0 0 1 21 18.5"/></svg><span class="lbl">Clienti e fornitori</span></button>
+      <button class="tab" role="tab" data-tab="mas" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M12 9v11"/><path d="M7 13h2"/><path d="M15 13h2"/><path d="M7 16h2"/><path d="M15 16h2"/></svg><span class="lbl">Mastrini e partitari</span></button>
       <button class="tab" role="tab" data-tab="sca" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="1.5"/><path d="M3.5 9.5h17"/><path d="M8 3v4M16 3v4"/><path d="M8 14h3M8 17h6"/></svg><span class="lbl">Scadenzario</span></button>
       <button class="tab" role="tab" data-tab="ban" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l9-5 9 5"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 20h18"/></svg><span class="lbl">Banche</span></button>
       <button class="tab" role="tab" data-tab="pag" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="1.5"/><circle cx="9" cy="12" r="2.2"/><path d="M5.8 17a3.4 3.4 0 0 1 6.4 0"/><path d="M14 11h4M14 14h3"/></svg><span class="lbl">Paghe</span></button>
@@ -388,6 +389,30 @@ pre.xml{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;back
         <tfoot id="pn-foot"></tfoot>
       </table></div>
     </div>
+  </section>
+
+  <!-- MASTRINI E PARTITARI -->
+  <section class="panel" id="tab-mas" hidden>
+    <div class="card">
+      <div class="row"><h2 id="mas-titolo">Mastrini</h2><span class="spacer"></span>
+        <div class="seg" role="group" aria-label="Mastrini o partitari"><button type="button" data-mas="conti" aria-pressed="true">Conti</button><button type="button" data-mas="C" aria-pressed="false">Clienti</button><button type="button" data-mas="F" aria-pressed="false">Fornitori</button></div>
+      </div>
+      <div class="formgrid">
+        <div class="fld wide" id="mas-f-conto"><label for="mas-conto">Conto</label><input id="mas-conto" class="mono" data-conto autocomplete="off" placeholder="Codice o descrizione; un mastro o un conto comprende i sottoconti"><span class="sub" id="mas-conto-d"></span></div>
+        <label class="fld wide" id="mas-f-an" for="mas-an" hidden>Nominativo<select id="mas-an"></select></label>
+        <label class="fld" for="mas-dal">Dal<input type="date" id="mas-dal"></label>
+        <label class="fld" for="mas-al">Al<input type="date" id="mas-al"></label>
+      </div>
+      <div class="row">
+        <label class="check" id="mas-tutti-l" for="mas-tutti"><input type="checkbox" id="mas-tutti"> Tutti i conti movimentati</label>
+        <span class="spacer"></span>
+        <button type="button" class="btn small" id="mas-prec" title="Conto o nominativo precedente">‹ Precedente</button><button type="button" class="btn small" id="mas-succ" title="Conto o nominativo successivo">Successivo ›</button>
+        <button type="button" class="btn small" id="mas-xlsx">Esporta in Excel</button>
+      </div>
+      <p class="hint" id="mas-msg" role="status" style="margin:4px 0 0"></p>
+      <p class="note">Saldo a inizio periodo, movimenti con contropartita e saldo progressivo (D dare, A avere). Un clic su un movimento apre la registrazione in prima nota. Con «Tutti» ogni scheda comincia su una pagina nuova in stampa e nel PDF.</p>
+    </div>
+    <div id="mas-out"></div>
   </section>
 
   <!-- PARTITARI -->
@@ -2337,6 +2362,7 @@ const PAGINE = {
   iva: ["Adempimenti", "IVA", "Liquidazioni periodiche con i righi della LIPE e comunicazione telematica."],
   riv: ["Adempimenti", "Registri IVA", "Registri delle vendite, degli acquisti e dei corrispettivi con numero di protocollo, per verificare e modificare le registrazioni."],
   dic: ["Adempimenti", "Dichiarazioni", "File per la Suite Dichiarazioni: Redditi, IRAP e IVA compilati dalla contabilità dell'esercizio."],
+  mas: ["Lavoro quotidiano", "Mastrini e partitari", "Schede dei conti e dei clienti e fornitori: saldo iniziale, movimenti con contropartita e saldo progressivo."],
   bil: ["Adempimenti", "Bilancio", "Bilancio di verifica, mastrini e prospetto CEE provvisorio."],
   rip: ["Impostazioni", "Ripresa saldi", "Saldi e partite aperte dell'azienda che arriva da un altro programma, registrati come apertura o ripresa in corso d'anno."],
   pdc: ["Impostazioni", "Piano dei conti", "Piano S1 dello Studio con voce di bilancio CEE e trattamento fiscale di ogni conto."],
@@ -2347,11 +2373,11 @@ function apriTab(t) {
   const [ey, ti, le] = PAGINE[t] || ["", "", ""];
   $("#pg-eyebrow").textContent = ey; $("#pg-title").textContent = ti; $("#pg-lead").textContent = le;
   $$(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["acq", "pn", "par", "sca", "ban", "pag", "iva", "riv", "f24", "cas", "ces", "chi", "bil", "dic", "pdc", "rip", "az"].forEach(k => $("#tab-" + k).hidden = k !== t);
+  ["acq", "pn", "par", "mas", "sca", "ban", "pag", "iva", "riv", "f24", "cas", "ces", "chi", "bil", "dic", "pdc", "rip", "az"].forEach(k => $("#tab-" + k).hidden = k !== t);
   renderTab();
 }
 function renderTab() {
-  if (S.tab === "pn") renderPN(); else if (S.tab === "par") renderPar(); else if (S.tab === "iva") { renderIVA(); renderLipe(); } else if (S.tab === "riv") renderRegIva();
+  if (S.tab === "pn") renderPN(); else if (S.tab === "par") renderPar(); else if (S.tab === "mas") renderMas(); else if (S.tab === "iva") { renderIVA(); renderLipe(); } else if (S.tab === "riv") renderRegIva();
   else if (S.tab === "bil") renderBil(); else if (S.tab === "pdc") renderPdc(); else if (S.tab === "rip") { renderRip(); renderBlu(); } else if (S.tab === "dic") renderDic(); else if (S.tab === "sca") renderSca(); else if (S.tab === "ban") renderBan(); else if (S.tab === "pag") renderPaghe(); else if (S.tab === "f24") renderF24(); else if (S.tab === "cas") renderCassa(); else if (S.tab === "ces") renderCespiti(); else if (S.tab === "chi") renderChiusura();
 }
 function renderAcqKpi() {
@@ -2806,7 +2832,7 @@ function renderBil() {
   const rows = [...agg].sort((a, b) => a[0].localeCompare(b[0]));
   let D = 0, A = 0;
   $("#bil-body").innerHTML = rows.length ? rows.map(([c, e]) => { D += e.d; A += e.a; const s = r2(e.d - e.a), x = conto(c);
-    return `<tr data-conto-row="${esc(c)}"${liv ? "" : ' style="cursor:pointer"'}><td class="mono">${esc(c)}</td><td>${esc(x?.d || "")}</td><td class="num">${num(e.d)}</td><td class="num">${num(e.a)}</td><td class="num">${s ? num(Math.abs(s)) + (s > 0 ? " D" : " A") : "–"}</td><td><span class="sub">${esc(liv || !x ? "" : VOCI_CEE[s >= 0 ? x.vd : x.va] || "")}</span></td></tr>`; }).join("")
+    return `<tr data-conto-row="${esc(c)}" style="cursor:pointer" title="Apri il mastrino"><td class="mono">${esc(c)}</td><td>${esc(x?.d || "")}</td><td class="num">${num(e.d)}</td><td class="num">${num(e.a)}</td><td class="num">${s ? num(Math.abs(s)) + (s > 0 ? " D" : " A") : "–"}</td><td><span class="sub">${esc(liv || !x ? "" : VOCI_CEE[s >= 0 ? x.vd : x.va] || "")}</span></td></tr>`; }).join("")
     : `<tr><td colspan="6" class="empty">Nessun movimento.</td></tr>`;
   $("#bil-foot").innerHTML = rows.length ? `<tr><td colspan="2">Totale</td><td class="num">${num(D)}</td><td class="num">${num(A)}</td><td colspan="2">${Math.abs(D - A) < 0.01 ? `<span class="pill alta">in quadratura</span>` : `<span class="pill bassa">differenza ${num(D - A)}</span>`}</td></tr>` : "";
   const cee = prospettoCEE(saldi);
@@ -3042,7 +3068,7 @@ function renderPar() {
         <div class="sub">${esc(descConto(a.conto))}${a.conto ? ` <span class="pill ${a.contoFisso ? "src" : "media"}">${a.contoFisso ? "fisso" : "appreso"}</span>` : ""}</div></td>
       <td class="num">${num(x.tot)}</td><td class="num">${num(x.ab)}</td><td class="num">${Math.abs(x.res) >= 0.01 ? `<strong>${num(x.res)}</strong>` : "–"}</td>
       <td><details><summary>Partite</summary>${x.d.map(r => { const res = r2(r.partita.totale - abbinatoA(r.id)); return `<div class="sub">${esc(CAUSALI[r.causale])} ${esc(r.numDoc)} del ${itDate(r.dataDoc)}: ${num(r.partita.totale)}${Math.abs(res) >= 0.01 ? ` · residuo <strong>${num(res)}</strong>` : " · chiusa"}${r.partita.scadenza ? ` · scade ${itDate(r.partita.scadenza)}` : ""}</div>`; }).join("") || `<div class="sub">Nessun documento</div>`}</details>
-        <button class="btn small danger" data-act="del-an" style="margin-top:6px">Elimina</button></td></tr>`;
+        <button class="btn small" data-act="partitario" style="margin-top:6px">Partitario</button> <button class="btn small danger" data-act="del-an" style="margin-top:6px">Elimina</button></td></tr>`;
   }).join("");
   const T = rows.reduce((s, x) => s + x.res, 0);
   $("#par-foot").innerHTML = `<tr><td></td><td colspan="5">${rows.length} nominativ${rows.length === 1 ? "o" : "i"} · ${rows.filter(x => !x.a.conto).length} senza conto abituale</td><td class="num">${num(T)}</td><td></td></tr>`;
@@ -3092,6 +3118,8 @@ $("#par-body").addEventListener("conto", e => {
   salvaAnag(a, { conto: e.detail, contoFisso: true }, `${a.denominazione}: conto abituale ${e.detail} ${descConto(e.detail)}.`).then(renderPar);
 });
 $("#par-body").addEventListener("click", async e => {
+  const pp = e.target.closest('button[data-act="partitario"]');
+  if (pp) { const a = S.anag.find(x => x.id === pp.closest("tr").dataset.an); if (a) apriMastrino(a.tipo, a.id); return; }
   const b = e.target.closest('button[data-act="del-an"]'); if (!b) return;
   const a = S.anag.find(x => x.id === b.closest("tr").dataset.an); if (!a) return;
   if (tutteRegs().some(r => r.anagId === a.id || r.righe.some(x => x.anagId === a.id))) { parAvviso(`${a.denominazione} ha registrazioni: non si può eliminare.`); return; }
@@ -7731,6 +7759,171 @@ async function briImporta() {
   renderBri();
 })();
 
+/* ======================= MASTRINI E PARTITARI =======================
+   Schede contabili dell'esercizio: per conto (un mastro o un conto comprende i sottoconti) oppure per cliente o
+   fornitore (partitario). Saldo a inizio periodo, movimenti con contropartita e saldo progressivo, totali.
+   Un conto, o tutti quelli movimentati nel periodo; stampa e PDF dalla barra della sezione, esportazione in Excel. */
+const MAS = { tipo: "conti", conto: "", an: "", dal: "", al: "", tutti: false };
+const masSaldo = s => Math.abs(s) < 0.005 ? "–" : `${num(Math.abs(s))} ${s > 0 ? "D" : "A"}`;
+function masPeriodo() {
+  const y = String(S.anno), dal = MAS.dal && MAS.dal.startsWith(y) ? MAS.dal : `${y}-01-01`, al = MAS.al && MAS.al.startsWith(y) ? MAS.al : `${y}-12-31`;
+  return { dal, al: al < dal ? dal : al };
+}
+/* contropartita di una riga: l'altra riga se sono due, altrimenti la più grande dell'altro lato */
+function masContro(r, x) {
+  const altre = (r.righe || []).filter(y => y !== x);
+  if (!altre.length) return "";
+  const lato = x.dare ? "avere" : "dare", opp = altre.filter(y => y[lato]).sort((a, b) => b[lato] - a[lato]);
+  const c = (opp[0] || altre[0]);
+  const nome = c.anagId ? (S.anag.find(a => a.id === c.anagId)?.denominazione || "") : "";
+  return `${c.conto}${nome ? ` ${nome}` : ` ${descConto(c.conto)}`}${opp.length > 1 ? " e altri" : ""}`;
+}
+const masNome = id => S.anag.find(a => a.id === id)?.denominazione || "";
+const masDoc = r => [r.numDoc ? `n. ${r.numDoc}` : "", r.dataDoc && r.dataDoc !== r.dataReg ? `del ${itDate(r.dataDoc)}` : ""].filter(Boolean).join(" ");
+/* movimenti di un conto (con i sottoconti se è un mastro o un conto) */
+function masMovConto(c) {
+  const mov = [], sotto = !contoOk(c);
+  for (const r of S.regs) for (const x of r.righe || []) if (x.conto === c || (sotto && x.conto.startsWith(c + "."))) mov.push({ r, d: x.dare || 0, a: x.avere || 0, conto: x.conto, x, nome: x.anagId ? masNome(x.anagId) : "" });
+  return mov;
+}
+/* partitario di un cliente o fornitore: righe intestate al nominativo; in semplificata, se le fatture non hanno la riga
+   del cliente o fornitore, documenti e incassi o pagamenti annotati */
+function masMovAnag(id, tipo) {
+  const mov = [];
+  for (const r of S.regs) for (const x of r.righe || []) if (x.anagId === id) mov.push({ r, d: x.dare || 0, a: x.avere || 0, conto: x.conto, x });
+  if (mov.length || !SEMPL) return mov;
+  for (const r of S.regs) {
+    if (r.anagId !== id || !r.partita) continue;
+    const t = r.partita.totale || 0;
+    mov.push({ r, d: tipo === "C" ? Math.max(t, 0) : Math.max(-t, 0), a: tipo === "C" ? Math.max(-t, 0) : Math.max(t, 0), conto: "" });
+    for (const i of r.incassi || []) mov.push({ r: { ...r, dataReg: i.data, causale: tipo === "C" ? "INC" : "PAG", descr: i.descr || (tipo === "C" ? "Incasso" : "Pagamento"), numDoc: r.numDoc, dataDoc: r.dataDoc }, d: tipo === "C" ? 0 : i.importo, a: tipo === "C" ? i.importo : 0, conto: i.conto || "", rif: r });
+  }
+  return mov;
+}
+/* una scheda: saldo iniziale, righe del periodo, totali */
+function masScheda(mov, { dal, al }) {
+  mov.sort((a, b) => a.r.dataReg.localeCompare(b.r.dataReg) || (a.r.causale === "AP" ? -1 : 0) - (b.r.causale === "AP" ? -1 : 0));
+  let ini = 0; const righe = [];
+  for (const m of mov) { if (m.r.dataReg < dal) ini += m.d - m.a; else if (m.r.dataReg <= al) righe.push(m); }
+  let s = r2(ini), D = 0, A = 0;
+  for (const m of righe) { D += m.d; A += m.a; s = r2(s + m.d - m.a); m.saldo = s; }
+  return { ini: r2(ini), righe, D: r2(D), A: r2(A), fine: s };
+}
+/* elenco delle schede da mostrare */
+function masSchede() {
+  const P = masPeriodo(), out = [];
+  if (MAS.tipo === "conti") {
+    const codici = MAS.tutti ? [...new Set(S.regs.flatMap(r => (r.righe || []).filter(x => r.dataReg <= P.al).map(x => x.conto)))].sort((a, b) => a.localeCompare(b, "it", { numeric: true })) : MAS.conto ? [MAS.conto] : [];
+    for (const c of codici) {
+      const sc = masScheda(masMovConto(c), P);
+      if (MAS.tutti && !sc.righe.length && Math.abs(sc.ini) < 0.005) continue;
+      out.push({ k: c, tit: `${c} · ${descConto(c) || "conto non nel piano"}`, sotto: !contoOk(c), ...sc });
+    }
+  } else {
+    const ids = MAS.tutti ? S.anag.filter(a => a.tipo === MAS.tipo && a.aziendaId === S.aziendaId).sort((a, b) => a.denominazione.localeCompare(b.denominazione, "it")).map(a => a.id) : MAS.an ? [MAS.an] : [];
+    for (const id of ids) {
+      const a = S.anag.find(x => x.id === id); if (!a) continue;
+      const sc = masScheda(masMovAnag(id, MAS.tipo), P);
+      if (MAS.tutti && !sc.righe.length && Math.abs(sc.ini) < 0.005) continue;
+      out.push({ k: id, tit: a.denominazione, sub: [a.piva ? `P.IVA ${a.piva}` : "", a.cf && a.cf !== a.piva ? `C.F. ${a.cf}` : "", indirizzoAn(a)].filter(Boolean).join(" · "), ...sc });
+    }
+  }
+  return out;
+}
+function renderMas() {
+  const az = aziendaCorrente(), P = masPeriodo();
+  $$(".seg button[data-mas]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mas === MAS.tipo)));
+  $("#mas-titolo").textContent = MAS.tipo === "conti" ? "Mastrini" : MAS.tipo === "C" ? "Partitari clienti" : "Partitari fornitori";
+  $("#mas-f-conto").hidden = MAS.tipo !== "conti"; $("#mas-f-an").hidden = MAS.tipo === "conti";
+  $("#mas-dal").value = P.dal; $("#mas-al").value = P.al;
+  $("#mas-tutti").checked = MAS.tutti; $("#mas-conto").disabled = MAS.tutti; $("#mas-an").disabled = MAS.tutti;
+  $("#mas-tutti-l").lastChild.textContent = MAS.tipo === "conti" ? " Tutti i conti movimentati" : MAS.tipo === "C" ? " Tutti i clienti movimentati" : " Tutti i fornitori movimentati";
+  if (MAS.tipo !== "conti") {
+    const sel = $("#mas-an"), mov = new Set(S.regs.flatMap(r => [r.anagId, ...(r.righe || []).map(x => x.anagId)]).filter(Boolean));
+    const lista = S.anag.filter(a => a.tipo === MAS.tipo && a.aziendaId === S.aziendaId).sort((a, b) => (mov.has(b.id) - mov.has(a.id)) || a.denominazione.localeCompare(b.denominazione, "it"));
+    sel.innerHTML = `<option value="">Scegli ${MAS.tipo === "C" ? "il cliente" : "il fornitore"}</option>` + lista.map(a => `<option value="${esc(a.id)}"${a.id === MAS.an ? " selected" : ""}>${esc(a.denominazione)}${mov.has(a.id) ? "" : " (senza movimenti)"}</option>`).join("");
+  } else { $("#mas-conto").value = MAS.conto; $("#mas-conto-d").textContent = MAS.conto ? `${descConto(MAS.conto) || "conto non nel piano"}${MAS.conto && !contoOk(MAS.conto) && PDC.has(MAS.conto) ? " · comprende i sottoconti" : ""}` : ""; }
+  const out = $("#mas-out");
+  if (!az) { out.innerHTML = ""; return; }
+  const schede = masSchede();
+  $("#mas-xlsx").disabled = !schede.length;
+  if (!schede.length) {
+    out.innerHTML = `<div class="card"><p class="empty">${MAS.tutti ? "Nessun movimento nel periodo." : MAS.tipo === "conti" ? "Scegli un conto (o un mastro: comprende i sottoconti), oppure «Tutti i conti movimentati»." : `Scegli ${MAS.tipo === "C" ? "un cliente" : "un fornitore"}, oppure «Tutti».`}</p></div>`;
+    $("#mas-msg").textContent = ""; return;
+  }
+  const colConto = MAS.tipo === "conti" ? schede.some(s => s.sotto) : true;
+  $("#mas-msg").textContent = schede.length > 1 ? `${schede.length} schede dal ${itDate(P.dal)} al ${itDate(P.al)}` : "";
+  out.innerHTML = schede.map((sc, i) => `<div class="card mas-scheda">
+    <h2${i ? ' class="st-pagina"' : ""}>${esc(sc.tit)}</h2>${sc.sub ? `<p class="sub" style="margin:0 0 6px">${esc(sc.sub)}</p>` : ""}
+    <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Causale</th><th>Documento</th><th>Descrizione</th>${colConto ? "<th>Conto</th>" : ""}<th>Contropartita</th><th class="num">Dare</th><th class="num">Avere</th><th class="num">Saldo</th></tr></thead><tbody>
+    ${P.dal > `${S.anno}-01-01` || Math.abs(sc.ini) >= 0.005 ? `<tr class="sub"><td>${itDate(P.dal)}</td><td colspan="${colConto ? 7 : 6}"><em>Saldo a inizio periodo</em></td><td class="num"><strong>${masSaldo(sc.ini)}</strong></td></tr>` : ""}
+    ${sc.righe.map(m => `<tr data-mas-reg="${esc((m.rif || m.r).id || "")}" style="cursor:pointer"><td>${itDate(m.r.dataReg)}</td><td><span class="pill src">${esc(m.r.causale)}</span></td><td class="mono">${esc(masDoc(m.r))}</td><td>${esc(m.r.descr || "")}${MAS.tipo === "conti" && m.nome ? `<div class="sub">${esc(m.nome)}</div>` : ""}</td>${colConto ? `<td class="mono">${esc(m.conto)}</td>` : ""}<td class="sub">${esc(m.x ? masContro(m.r, m.x) : m.conto ? `${m.conto} ${descConto(m.conto)}` : "")}</td><td class="num">${m.d ? num(m.d) : ""}</td><td class="num">${m.a ? num(m.a) : ""}</td><td class="num">${masSaldo(m.saldo)}</td></tr>`).join("")}
+    ${sc.righe.length ? "" : `<tr><td colspan="${colConto ? 9 : 8}" class="empty">Nessun movimento nel periodo.</td></tr>`}
+    </tbody><tfoot><tr><td colspan="${colConto ? 6 : 5}">Totale movimenti (${sc.righe.length})</td><td class="num">${num(sc.D)}</td><td class="num">${num(sc.A)}</td><td class="num"><strong>${masSaldo(sc.fine)}</strong></td></tr></tfoot></table></div>
+  </div>`).join("");
+}
+/* scorre al conto o nominativo precedente o successivo tra quelli movimentati */
+function masScorri(dir) {
+  if (MAS.tipo === "conti") {
+    const l = [...new Set(S.regs.flatMap(r => (r.righe || []).map(x => x.conto)))].sort((a, b) => a.localeCompare(b, "it", { numeric: true }));
+    if (!l.length) return; const i = l.indexOf(MAS.conto); MAS.conto = l[i < 0 ? 0 : (i + dir + l.length) % l.length];
+  } else {
+    const opts = [...$("#mas-an").options].map(o => o.value).filter(Boolean);
+    if (!opts.length) return; const i = opts.indexOf(MAS.an); MAS.an = opts[i < 0 ? 0 : (i + dir + opts.length) % opts.length];
+  }
+  MAS.tutti = false; renderMas();
+}
+async function masExcel() {
+  const schede = masSchede(), P = masPeriodo(), b = $("#mas-xlsx");
+  if (!schede.length) return;
+  b.disabled = true; $("#mas-msg").textContent = "Preparazione del file Excel…";
+  try {
+    await caricaLib("xlsx");
+    const az = aziendaCorrente(), aoa = [[az?.denominazione || "", "", "", MAS.tipo === "conti" ? "Mastrini" : MAS.tipo === "C" ? "Partitari clienti" : "Partitari fornitori", `dal ${itDate(P.dal)} al ${itDate(P.al)}`], []];
+    for (const sc of schede) {
+      aoa.push([sc.tit]); if (sc.sub) aoa.push([sc.sub]);
+      aoa.push(["Data", "Causale", "Documento", "Descrizione", "Conto", "Contropartita", "Dare", "Avere", "Saldo (+ dare, − avere)"]);
+      aoa.push([P.dal.split("-").reverse().join("/"), "", "", "Saldo a inizio periodo", "", "", "", "", sc.ini]);
+      for (const m of sc.righe) aoa.push([m.r.dataReg.split("-").reverse().join("/"), m.r.causale, masDoc(m.r), [m.r.descr || "", MAS.tipo === "conti" && m.nome ? m.nome : ""].filter(Boolean).join(" · "), m.conto, m.x ? masContro(m.r, m.x) : "", m.d || null, m.a || null, m.saldo]);
+      aoa.push(["", "", "", `Totale movimenti (${sc.righe.length})`, "", "", sc.D, sc.A, sc.fine], []);
+    }
+    const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 11 }, { wch: 8 }, { wch: 22 }, { wch: 48 }, { wch: 13 }, { wch: 38 }, { wch: 13 }, { wch: 13 }, { wch: 14 }];
+    for (const k of Object.keys(ws)) if (/^[GHI]\d+$/.test(k) && typeof ws[k].v === "number") ws[k].z = "#,##0.00";
+    const wb = window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb, ws, MAS.tipo === "conti" ? "Mastrini" : "Partitari");
+    const blob = new Blob([window.XLSX.write(wb, { type: "array", bookType: "xlsx" })], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const nome = `${MAS.tipo === "conti" ? "Mastrini" : "Partitari"}_${(az?.denominazione || "azienda").replace(/[^\w]+/g, "_")}_${S.anno}.xlsx`;
+    let esito = "";
+    try { const d = window.claude && window.claude.use ? await Promise.race([window.claude.use("downloads"), new Promise(r => setTimeout(() => r(null), 3000))]) : null; if (d) { await d.save({ filename: nome, data: blob }); esito = "salvato"; } } catch (e) { if (e && e.code === "declined") esito = "annullato"; }
+    if (!esito) { const u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 15000); esito = "scaricato"; }
+    $("#mas-msg").textContent = esito === "annullato" ? "Salvataggio annullato." : `File pronto: ${nome}`;
+  } catch (e) { $("#mas-msg").textContent = `Esportazione non riuscita: ${e.message || e}`; }
+  b.disabled = false;
+}
+/* apre la scheda di un conto o di un nominativo da altre sezioni (bilancio, clienti e fornitori) */
+function apriMastrino(tipo, k, al) {
+  MAS.tipo = tipo; MAS.tutti = false;
+  if (tipo === "conti") MAS.conto = k; else MAS.an = k;
+  if (al) { MAS.al = al; $("#mas-al").value = al; }
+  apriTab("mas");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+$$(".seg button[data-mas]").forEach(b => b.addEventListener("click", () => { MAS.tipo = b.dataset.mas; renderMas(); }));
+$("#mas-conto").addEventListener("conto", e => { MAS.conto = e.detail || e.target.value.trim(); MAS.tutti = false; renderMas(); });
+$("#mas-conto").addEventListener("change", e => { const v = e.target.value.trim(); if (/^\d{2}(\.\d{2}){0,3}$/.test(v) && v !== MAS.conto) { MAS.conto = v; MAS.tutti = false; renderMas(); } });
+$("#mas-an").addEventListener("change", e => { MAS.an = e.target.value; MAS.tutti = false; renderMas(); });
+$("#mas-dal").addEventListener("change", e => { MAS.dal = e.target.value; renderMas(); });
+$("#mas-al").addEventListener("change", e => { MAS.al = e.target.value; renderMas(); });
+$("#mas-tutti").addEventListener("change", e => { MAS.tutti = e.target.checked; renderMas(); });
+$("#mas-prec").addEventListener("click", () => masScorri(-1));
+$("#mas-succ").addEventListener("click", () => masScorri(1));
+$("#mas-xlsx").addEventListener("click", masExcel);
+$("#mas-out").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-mas-reg]"); if (!tr) return;
+  const reg = S.regs.find(r => r.id === tr.dataset.masReg); if (!reg) return;
+  apriTab("pn"); apriEditorPN(reg); setTimeout(() => $("#pn-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+});
+
 /* ---------- azienda ---------- */
 let azNuova = false, azForza = false;
 const AZ_CAMPI = [["a-den", "denominazione"], ["a-forma", "forma"], ["a-piva", "piva"], ["a-cf", "cf", "up"], ["a-pec", "pec"], ["a-stato", "stato"], ["a-liq-data", "liqData"],
@@ -7930,7 +8123,7 @@ $("#liq-pre-auto").addEventListener("click", async () => {
   finally { b.disabled = false; }
 });
 ["#bil-al", "#bil-livello"].forEach(s => $(s).addEventListener("change", renderBil));
-$("#bil-body").addEventListener("click", e => { const tr = e.target.closest("tr[data-conto-row]"); if (tr && $("#bil-livello").value === "0") mastrino(tr.dataset.contoRow); });
+$("#bil-body").addEventListener("click", e => { const tr = e.target.closest("tr[data-conto-row]"); if (tr) apriMastrino("conti", tr.dataset.contoRow, $("#bil-al").value); });
 
 
 /* azienda */
