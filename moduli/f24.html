@@ -1338,7 +1338,16 @@ const RT={
 };
 const rateizzabile=x=>x.on&&(x.r.rat==='0101'||x.r.sez==='inps');
 /* il piano si offre per il saldo e primo acconto versati nei termini (anche con lo 0,40%), non con il ravvedimento */
-function rateAmmessa(C){return IMP.group==='g1'&&C.items.some(rateizzabile)&&!C.items.some(x=>x.on&&(x.stato==='ravv'||x.stato==='late'||x.stato==='inps-late'))}
+function rateAmmessa(C){return C.items.some(rateizzabile)}
+/* base del piano: righe del saldo e primo acconto. Se il versamento scelto è nei termini (anche con lo 0,40%) la prima rata
+   è a quella data; altrimenti il piano parte dalla scadenza originaria (le rate già scadute e non versate si regolarizzano
+   con il ravvedimento, nella scheda Ravvedimento o scegliendo la data di versamento). */
+function pianoBase(){
+  const P=IMP.p,dl=P.scadenze.saldo,nei=IMP.group==='g1'&&IMP.vers<=addDays(dl,30);
+  const sv={group:IMP.group,vers:IMP.vers};IMP.group='g1';IMP.vers=nei?sv.vers:dl;
+  const C=impCompute(),start=IMP.vers;IMP.group=sv.group;IMP.vers=sv.vers;
+  return {C,start,nei};
+}
 /* righe e interessi della rata k di n */
 function rataRighe(C,n,k,pct){
   const rows=[],intr={};
@@ -1354,31 +1363,35 @@ function rataRighe(C,n,k,pct){
   return {rows,interessi:Object.values(intr)};
 }
 /* piano completo: rate con capitale, interessi, compensazioni e totale; poi il secondo acconto */
-function pianoVersamenti(C){
-  const P=IMP.p,n=rateAmmessa(C)?Math.min(IMP.rate||1,RT.max(IMP.vers)):1,pr=RT.piano(IMP.vers,n);
-  let cred=r2(C.cred.reduce((s,x)=>s+(x.on?x.use:0),0));
+function pianoVersamenti(C,start){
+  const P=IMP.p;start=start||IMP.vers;const n=rateAmmessa(C)?Math.min(IMP.rate||1,RT.max(start)):1,pr=RT.piano(start,n);
+  const credDisp=x=>x.on?(IMP.covr[x.i]!==undefined?x.use:x.c.imp):0;
+  let cred=r2(C.cred.reduce((s,x)=>s+credDisp(x),0));
   const rate=pr.map(q=>{const R=rataRighe(C,n,q.k,q.pct);
     const cap=r2(R.rows.reduce((s,o)=>s+o.imp-(o.int||0),0)),int=r2(R.interessi.reduce((s,o)=>s+o.imp,0)+R.rows.reduce((s,o)=>s+(o.int||0),0));
     const lordo=r2(cap+int),comp=r2(Math.min(cred,lordo));cred=r2(cred-comp);
     return {...q,R,cap,int,comp,tot:r2(lordo-comp)}});
-  const g2=IMP.group==='g1'?P.righe.filter(r=>groupOf(r)==='g2'):[];
-  return {n,rate,g2,g2tot:r2(g2.reduce((s,r)=>s+r.imp,0)),credResiduo:cred};
+  const g2=P.righe.filter(r=>groupOf(r)==='g2');
+  const g2tot=r2(g2.reduce((s,r)=>s+r.imp,0)),g2comp=r2(Math.min(cred,g2tot));cred=r2(cred-g2comp);
+  return {n,rate,g2,g2tot,g2comp,credResiduo:cred,credDisp};
 }
-function pianoHtml(C){
-  const P=IMP.p,pv=pianoVersamenti(C),ok=rateAmmessa(C),mx=RT.max(IMP.vers);
-  if(IMP.group==='g2'||!C.items.some(x=>x.on))return '';
+function pianoHtml(){
+  const P=IMP.p;if(!P.righe.some(r=>groupOf(r)==='g1'))return '';
+  const B=pianoBase(),C=B.C,pv=pianoVersamenti(C,B.start),ok=rateAmmessa(C),mx=RT.max(B.start),oggi=todayIso();
+  if(!C.items.some(x=>x.on))return '';
   const sel=ok?`<div><label class="field-lbl" for="imp-rate">Rateazione</label><select id="imp-rate">${Array.from({length:mx},(_,i)=>i+1).map(k=>`<option value="${k}" ${pv.n===k?'selected':''}>${k===1?'Unica soluzione':k+' rate mensili'}</option>`).join('')}</select></div>`:'';
   const g2=pv.g2.length?`<label class="chk-inline"><input type="checkbox" id="imp-acc2" ${IMP.acc2?'checked':''}> Salva in archivio anche l’F24 del secondo acconto (${isoToIt(P.scadenze.acc2)})</label>`:'';
   const voci=pv.rate.map(q=>({d:q.data,h:`<tr><td class="mono">${pv.n>1?String(q.k).padStart(2,'0')+String(pv.n).padStart(2,'0'):'—'}</td><td class="mono">${isoToIt(q.data)}</td><td>${q.k===1?(pv.n>1?'Prima rata':'Saldo e primo acconto'):'Rata '+q.k+' di '+pv.n}</td><td class="r mono">${q.pct?q.pct.toLocaleString('it-IT',{minimumFractionDigits:2})+'%':''}</td><td class="r mono">${fmt(q.cap)}</td><td class="r mono">${q.int?fmt(q.int):''}</td><td class="r mono" style="color:var(--green)">${q.comp?'− '+fmt(q.comp):''}</td><td class="r mono"><b>${fmt(q.tot)}</b></td></tr>`}));
-  if(pv.g2.length)voci.push({d:P.scadenze.acc2,h:`<tr><td class="mono">—</td><td class="mono">${isoToIt(P.scadenze.acc2)}</td><td>Secondo o unico acconto (non rateizzabile)</td><td></td><td class="r mono">${fmt(pv.g2tot)}</td><td></td><td></td><td class="r mono"><b>${fmt(pv.g2tot)}</b></td></tr>`});
+  if(pv.g2.length)voci.push({d:P.scadenze.acc2,h:`<tr><td class="mono">—</td><td class="mono">${isoToIt(P.scadenze.acc2)}</td><td>Secondo o unico acconto (non rateizzabile)</td><td></td><td class="r mono">${fmt(pv.g2tot)}</td><td></td><td class="r mono" style="color:var(--green)">${pv.g2comp?'− '+fmt(pv.g2comp):''}</td><td class="r mono"><b>${fmt(r2(pv.g2tot-pv.g2comp))}</b></td></tr>`});
   const righe=voci.sort((x,y)=>x.d.localeCompare(y.d)).map(v=>v.h).join('');
-  const totInt=r2(pv.rate.reduce((s,q)=>s+q.int,0)),tot=r2(pv.rate.reduce((s,q)=>s+q.tot,0)+pv.g2tot);
+  const totInt=r2(pv.rate.reduce((s,q)=>s+q.int,0)),tot=r2(pv.rate.reduce((s,q)=>s+q.tot,0)+pv.g2tot-pv.g2comp);
   return `<div id="imp-piano" style="margin-top:16px">
     <div class="imp-grid">${sel}<div class="imp-opts">${g2}</div></div>
-    <p class="print-note" style="margin:8px 0 0"><b>Piano dei versamenti e scadenze.</b> ${ok?`Saldo e primo acconto si possono dividere fino a ${mx} rate mensili di pari importo (le successive alla prima il 16 di ogni mese, ultima entro il ${RT.ultimoMese(IMP.vers)===11?'16 novembre':'16 dicembre'}), con gli interessi del 4% annuo; il secondo acconto non è rateizzabile.`:IMP.group==='g1'?'Rateazione non disponibile: nessun importo rateizzabile oppure versamento oltre i termini (ravvedimento).':''} ${pv.n>1?'Con CREA si salvano in archivio tutte le rate, ognuna con la sua scadenza (compaiono nello scadenzario del portale), e si apre la prima.':''}</p>
+    <p class="print-note" style="margin:8px 0 0"><b>Piano dei versamenti e scadenze.</b> ${ok?`Saldo e primo acconto si possono dividere fino a ${mx} rate mensili di pari importo (le successive alla prima il 16 di ogni mese, ultima entro il ${RT.ultimoMese(B.start)===11?'16 novembre':'16 dicembre'}), con gli interessi del 4% annuo; il secondo acconto non è rateizzabile.`:'Nessun importo rateizzabile: saldo e primo acconto in unica soluzione.'} ${B.nei?'':`Il piano parte dalla scadenza del ${isoToIt(B.start)}${B.start<oggi?': le rate già scadute e non versate si regolarizzano con il ravvedimento':''}.`} «Salva il piano in archivio» crea una delega F24 per ogni rata${pv.g2.length&&IMP.acc2?' e per il secondo acconto':''}, ognuna con la sua scadenza: compaiono nello scadenzario del portale.</p>
     <div style="overflow-x:auto"><table class="tbl imp-tbl"><thead><tr><th>Rata</th><th>Scadenza</th><th>Versamento</th><th class="r">Interessi %</th><th class="r">Imposte e contributi</th><th class="r">Interessi</th><th class="r">Compensazioni</th><th class="r">Da versare</th></tr></thead>
     <tbody>${righe}</tbody><tfoot><tr><td colspan="5"><b>Totale</b>${totInt?' (interessi di rateazione € '+fmt(totInt)+')':''}</td><td></td><td></td><td class="r mono"><b>${fmt(tot)}</b></td></tr></tfoot></table></div>
     ${pv.credResiduo>0.004?`<p class="print-note">Credito non utilizzato nel piano: € ${fmt(pv.credResiduo)}.</p>`:''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button type="button" class="btn" id="imp-piano-go">SALVA IL PIANO IN ARCHIVIO</button></div>
   </div>`;
 }
 /* modello F24 vuoto con i dati del contribuente (dall'archivio, poi dalla dichiarazione) */
@@ -1396,7 +1409,8 @@ const impRif=r=>r.sez==='regioni'?{reg:r.reg||''}:r.sez==='imu'?{ente:r.ente||''
 function impChiudi(st){['erario','inps','regioni','imu'].forEach(k=>{if(!st[k].length)st[k].push(EMPTY[k]())});return st}
 /* deleghe del piano: una per rata (crediti compensati dalla prima in avanti) */
 function impBuildPiano(C,pv){
-  let credLeft=C.cred.filter(x=>x.on&&x.use>0).map(x=>({c:x.c,res:x.use}));
+  const credLeft=C.cred.map(x=>({c:x.c,res:pv.credDisp?pv.credDisp(x):(x.on?x.use:0)})).filter(x=>x.res>0.004);
+  pv.credLeft=credLeft;
   return pv.rate.map(q=>{const st=impBase();st.meta.scadenza=q.data;
     q.R.rows.forEach(o=>{const r=o.x.r;
       if(r.sez==='inps'){impPush(st,'inps',{sede:r.sede||'',caus:r.caus||r.cod,matr:r.matr||'',da:r.da||'',a:r.a||'',deb:fmt(o.imp)});return}
@@ -1408,11 +1422,15 @@ function impBuildPiano(C,pv){
     return impChiudi(st)});
 }
 /* delega del secondo acconto, salvata in archivio con la sua scadenza */
-function impBuildAcc2(){
+function impBuildAcc2(pv){
   const P=IMP.p,st=impBase();st.meta.scadenza=P.scadenze.acc2;
   P.righe.filter(r=>groupOf(r)==='g2').forEach(r=>{
     if(r.sez==='inps'){impPush(st,'inps',{sede:r.sede||'',caus:r.caus||r.cod,matr:r.matr||'',da:r.da||'',a:r.a||'',deb:fmt(r.imp)});return}
     impPush(st,r.sez,{...impRif(r),cod:r.cod,rat:r.rat||'',anno:r.anno||'',deb:fmt(r.imp)})});
+  /* credito rimasto dopo le rate */
+  let resto=pv&&pv.g2comp||0;
+  ((pv&&pv.credLeft)||[]).forEach(cl=>{if(resto<=0.004||cl.res<=0.004)return;const u=r2(Math.min(cl.res,resto));cl.res=r2(cl.res-u);resto=r2(resto-u);
+    impPush(st,cl.c.sez,{...impRif(cl.c),cod:cl.c.cod,rat:cl.c.rat||'',anno:cl.c.anno||'',cred:fmt(u)})});
   return impChiudi(st);
 }
 async function impSalvaPiano(deleghe){
@@ -1501,7 +1519,7 @@ function renderImp(){
       <div style="overflow-x:auto"><table class="tbl imp-tbl"><thead><tr><th></th><th>Sezione</th><th>Codice</th><th>Descrizione</th><th>Anno</th><th>Rif.</th><th>Scadenza</th><th class="r">Da dichiarazione</th><th class="r">Da versare</th></tr></thead><tbody>${rowsHtml||'<tr><td colspan="9" class="print-note">Nessuna riga per il versamento scelto.</td></tr>'}</tbody></table></div>
       ${C.cred.length?`<div style="overflow-x:auto"><table class="tbl imp-tbl"><thead><tr><th></th><th>Sezione</th><th>Codice</th><th>Crediti in compensazione</th><th>Anno</th><th>Rif.</th><th class="r">Disponibile</th><th class="r">Da compensare</th></tr></thead><tbody>${credHtml}</tbody></table></div>`:''}`
       :`<p style="margin:0 0 6px">La dichiarazione non espone importi da versare con il modello F24.</p>`}
-      ${P.righe.length?pianoHtml(C):''}
+      ${P.righe.length?pianoHtml():''}
       <div class="imp-tot mono"><span>Debiti <strong style="color:var(--red)">€ ${fmt(C.deb)}</strong></span><span>Crediti <strong style="color:var(--green)">€ ${fmt(C.credTot)}</strong></span><span>Saldo <strong>€ ${fmt(C.saldo)}</strong></span></div>
       ${C.warn.length?`<div class="imp-warn">${C.warn.map(w=>`<p>⚠ ${esc(w)}</p>`).join('')}</div>`:''}
       <p class="print-note" style="margin-top:12px">${arch?'Anagrafica, domicilio fiscale, banca e IBAN ripresi dall’archivio F24 di questo contribuente.':'Contribuente non presente nell’archivio F24: completare domicilio fiscale e conto di addebito, poi premere SALVA.'}</p>
@@ -1540,11 +1558,11 @@ function impBuild(){
   return st;
 }
 async function impGo(){
-  const C0=impCompute(),pv=pianoVersamenti(C0),conAcc2=IMP.group==='g1'&&IMP.acc2&&pv.g2.length;
+  const B0=IMP.group==='g1'?pianoBase():null,C0=B0?B0.C:null,pv=B0&&B0.nei?pianoVersamenti(C0,B0.start):{n:1,g2:[]},conAcc2=!!(B0&&B0.nei&&IMP.acc2&&pv.g2.length);
   if(pv.n>1||conAcc2){
     if(C0.saldo<0){toast('Il saldo non può essere negativo: ridurre il credito compensato');return}
     if(dirty&&!(await askConfirm('Il modello F24 aperto ha modifiche non salvate che andranno perse. Creare le deleghe del piano?','CREA')))return;
-    const deleghe=impBuildPiano(C0,pv);if(conAcc2)deleghe.push(impBuildAcc2());
+    const deleghe=impBuildPiano(C0,pv);if(conAcc2)deleghe.push(impBuildAcc2(pv));
     if(!(await impSalvaPiano(deleghe)))return;
     applyState(normalize(JSON.parse(JSON.stringify(deleghe[0]))));dirty=false;showTab('form');
     toast(pv.n>1?`Piano salvato in archivio: ${pv.n} rate${conAcc2?' e secondo acconto':''}. Aperta la prima rata (${isoToIt(deleghe[0].meta.scadenza)}).`:`Salvati in archivio saldo e primo acconto (${isoToIt(deleghe[0].meta.scadenza)}) e secondo acconto (${isoToIt(IMP.p.scadenze.acc2)}).`);
@@ -1571,8 +1589,14 @@ document.addEventListener('change',e=>{const t=e.target;if(!IMP||!t.closest||!t.
   else return;
   renderImp();
 });
-document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('#imp-go,#imp-cancel');if(!b)return;
-  if(b.id==='imp-go')impGo();else{showTab('form')}});
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('#imp-go,#imp-cancel,#imp-piano-go');if(!b)return;
+  if(b.id==='imp-go')impGo();else if(b.id==='imp-piano-go')impSalvaSoloPiano();else{showTab('form')}});
+async function impSalvaSoloPiano(){
+  const B=pianoBase(),pv=pianoVersamenti(B.C,B.start);
+  const deleghe=impBuildPiano(B.C,pv);if(IMP.acc2&&pv.g2.length)deleghe.push(impBuildAcc2(pv));
+  if(!(await impSalvaPiano(deleghe)))return;
+  toast(`Salvate in archivio ${deleghe.length} deleghe F24: ${deleghe.map(st=>isoToIt(st.meta.scadenza)).join(', ')}.`);
+}
 
 /* apertura di un F24 dell'archivio dalla Scrivania della suite */
 window.suiteLoadF24=async function(cf,id){
