@@ -8739,5 +8739,309 @@ html.stampa-pdf .solo-stampa.st-attiva{display:block!important;position:absolute
 })();
 
 </script>
+<script>/*PONTE-EFATTURA*/
+/* Portale Studio Sandalia – ponte con Sandalia e-Fattura: le fatture emesse e ricevute di e-Fattura entrano nella lettura XML di questo modulo
+ * Lettura diretta dal progetto Supabase di e-Fattura con l'accesso dell'utente (chiave pubblica, permessi RLS). Nessuna scrittura su e-Fattura.
+ * © 2026 Squintu Massimiliano */
+(function () {
+  "use strict";
+  const K_CONF = "sandalia-ponte-efattura-conf", K_SESS = "sandalia-ponte-efattura-sessione";
+  const ST_E_OK = ["CONSEGNATA", "MANCATA_CONSEGNA", "ACCETTATA", "DECORRENZA"];
+  const ST_R_OK = ["RICEVUTA", "REGISTRATA"];
+  const ST_NOMI = { INVIATA: "In attesa di esito", CONSEGNATA: "Consegnata", MANCATA_CONSEGNA: "Mancata consegna", ACCETTATA: "Accettata (PA)", RIFIUTATA: "Rifiutata (PA)",
+    DECORRENZA: "Decorrenza termini", RICEVUTA: "Ricevuta", REGISTRATA: "Registrata", RIFIUTATA_R: "Rifiutata" };
+
+  /* adattatore: ordinaria e semplificata (aziende) oppure forfettaria (clienti) */
+  const A = {
+    soggetto() {
+      try { if (typeof aziendaCorrente === "function") return aziendaCorrente(); } catch (e) {}
+      try { if (typeof clienteCorrente === "function") return clienteCorrente(); } catch (e) {}
+      return null;
+    },
+    nomeSoggetto: () => (typeof clienteCorrente === "function" && typeof aziendaCorrente !== "function") ? "cliente" : "azienda",
+    anno() { try { if (typeof S !== "undefined" && S && Number(S.anno)) return Number(S.anno); } catch (e) {} return new Date().getFullYear(); },
+    async leggi(files) {
+      if (typeof gestisciDocumenti === "function") return gestisciDocumenti(files);
+      if (typeof gestisciFile === "function") return gestisciFile(files);
+      throw new Error("Lettura dei file non disponibile in questo modulo");
+    },
+    log(n, m, c) { try { if (typeof log === "function") log(n, m, c); } catch (e) {} },
+    zona: () => document.getElementById("drop-doc") || document.getElementById("drop")
+  };
+
+  const cifre = s => String(s || "").replace(/\D/g, "");
+  const maiu = s => String(s || "").toUpperCase().replace(/\s/g, "");
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
+  const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const dataIt = d => /^\d{4}-\d{2}-\d{2}/.test(d || "") ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "";
+  const eur = n => Number(n) ? Number(n).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
+  const ora = () => Math.floor(Date.now() / 1000);
+
+  function normUrl(u) {
+    u = String(u || "").trim();
+    const dash = u.match(/supabase\.com\/dashboard\/project\/([a-z0-9]{15,30})/i); if (dash) return `https://${dash[1].toLowerCase()}.supabase.co`;
+    const m = u.match(/^(?:https?:\/\/)?([a-z0-9-]+\.supabase\.(?:co|in))/i); if (m) return "https://" + m[1].toLowerCase();
+    try { return new URL(/^https?:/i.test(u) ? u : "https://" + u).origin; } catch (e) { return u.replace(/\/+$/, ""); }
+  }
+  function chiaveSegreta(k) {
+    k = String(k || "").trim();
+    if (/^sb_secret_/i.test(k)) return true;
+    const p = k.split("."); if (p.length !== 3) return false;
+    try { return /service_role/.test(atob(p[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch (e) { return false; }
+  }
+  /* configurazione: quella salvata qui, altrimenti quella di e-Fattura aperta nello stesso sito */
+  function conf() {
+    const c = lsGet(K_CONF, null);
+    if (c && c.url && c.key) return c;
+    const fe = lsGet("sfe-config", null);
+    if (fe && fe.supabaseUrl && fe.supabaseKey && !chiaveSegreta(fe.supabaseKey)) return { url: normUrl(fe.supabaseUrl), key: fe.supabaseKey, daEfattura: true };
+    return null;
+  }
+
+  /* ---------- sessione ---------- */
+  async function auth(c, tipo, corpo) {
+    const r = await fetch(`${c.url}/auth/v1/token?grant_type=${tipo}`, { method: "POST", headers: { apikey: c.key, "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const m = j.error_description || j.msg || j.message || "";
+      throw new Error(/invalid login|invalid_grant|credentials/i.test(m) ? "E-mail o password non corrette" : /not confirmed/i.test(m) ? "E-mail non ancora confermata" : (m || `Accesso non riuscito (HTTP ${r.status})`));
+    }
+    const s = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at || ora() + (j.expires_in || 3600), email: (j.user && j.user.email) || corpo.email || "", url: c.url };
+    lsSet(K_SESS, s); return s;
+  }
+  /* sessione di e-Fattura già aperta in questo browser: se ne legge solo il token di accesso valido (il token di rinnovo resta a e-Fattura) */
+  function tokenEfattura(c) {
+    try {
+      const ref = new URL(c.url).hostname.split(".")[0];
+      let v = localStorage.getItem(`sb-${ref}-auth-token`); if (!v) return null;
+      if (v.startsWith("base64-")) v = atob(v.slice(7));
+      const j = JSON.parse(v), s = j.currentSession || j;
+      if (s && s.access_token && Number(s.expires_at) > ora() + 120) return { access_token: s.access_token, expires_at: Number(s.expires_at), email: (s.user && s.user.email) || "", prestata: true };
+    } catch (e) {}
+    return null;
+  }
+  async function sessione(c, forza) {
+    let s = lsGet(K_SESS, null);
+    if (s && s.url !== c.url) { lsSet(K_SESS, null); s = null; }
+    if (s && s.refresh_token && (forza || !(Number(s.expires_at) > ora() + 60))) {
+      try { s = await auth(c, "refresh_token", { refresh_token: s.refresh_token }); } catch (e) { lsSet(K_SESS, null); s = null; }
+    }
+    if (s && s.access_token) return s;
+    return forza ? null : tokenEfattura(c);
+  }
+  async function rest(c, percorso, opz) {
+    opz = opz || {};
+    let s = await sessione(c);
+    if (!s) throw Object.assign(new Error("Accedi con le credenziali di e-Fattura"), { login: true });
+    const chiama = t => fetch(`${c.url}/rest/v1/${percorso}`, { headers: Object.assign({ apikey: c.key, Authorization: `Bearer ${t}`, Accept: "application/json" }, opz.headers || {}) });
+    let r = await chiama(s.access_token);
+    if (r.status === 401) {
+      s = await sessione(c, true);
+      if (!s) throw Object.assign(new Error("Sessione scaduta: accedi di nuovo"), { login: true });
+      r = await chiama(s.access_token);
+    }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || `Lettura da e-Fattura non riuscita (HTTP ${r.status})`); }
+    return r.json();
+  }
+  async function tutte(c, percorso) {
+    const out = [];
+    for (let da = 0; da < 20000; da += 1000) {
+      const parte = await rest(c, percorso, { headers: { "Range-Unit": "items", Range: `${da}-${da + 999}` } });
+      out.push(...parte); if (parte.length < 1000) break;
+    }
+    return out;
+  }
+
+  /* ---------- interfaccia ---------- */
+  const css = document.createElement("style");
+  css.textContent = `
+.pef-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.pef-bar .pef-nota{font-size:12.5px;color:var(--muted)}
+#pef-dlg{border:1px solid var(--line);border-radius:var(--r,12px);padding:0;width:min(980px,96vw);max-height:92vh;background:var(--surface);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.25)}
+#pef-dlg::backdrop{background:rgba(10,20,30,.45)}
+#pef-dlg .pef-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+#pef-dlg .pef-h h3{margin:0;font:700 17px/1.2 var(--f-display,inherit)}
+#pef-dlg .pef-b{padding:16px 20px;overflow:auto;max-height:calc(92vh - 140px)}
+#pef-dlg .pef-f{display:flex;gap:10px;justify-content:flex-end;align-items:center;padding:12px 20px;border-top:1px solid var(--line);flex-wrap:wrap}
+#pef-dlg .pef-f .pef-sp{flex:1;font-size:13px;color:var(--muted)}
+#pef-dlg .pef-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+#pef-dlg label.pef-l{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:var(--muted)}
+#pef-dlg input,#pef-dlg select{font:14px var(--f-body,inherit);padding:8px 10px;border:1px solid var(--line-strong,#ccc);border-radius:var(--r-sm,8px);background:var(--surface);color:var(--ink)}
+#pef-dlg .pef-msg{padding:10px 12px;border-radius:8px;font-size:13.5px;margin:0 0 12px}
+#pef-dlg .pef-msg.err{background:var(--danger-soft,#fde);color:var(--danger,#a00)}
+#pef-dlg .pef-msg.ok{background:var(--ok-soft,#efe);color:var(--ok,#060)}
+#pef-dlg .pef-msg.info{background:var(--accent-soft,#eef);color:var(--ink)}
+#pef-dlg table{width:100%;border-collapse:collapse;font-size:13px}
+#pef-dlg th,#pef-dlg td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+#pef-dlg th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);position:sticky;top:0;background:var(--surface)}
+#pef-dlg td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+#pef-dlg tr.pef-no td{color:var(--faint,#999)}
+#pef-dlg .pef-dir{display:inline-block;font:600 11px/1 var(--f-mono,monospace);padding:3px 6px;border-radius:5px;background:var(--surface-3,#eee)}
+#pef-dlg .pef-chi{background:none;border:0;font-size:22px;line-height:1;cursor:pointer;color:var(--muted)}`;
+  document.head.appendChild(css);
+
+  const dlg = document.createElement("dialog"); dlg.id = "pef-dlg"; dlg.setAttribute("aria-labelledby", "pef-tit");
+  dlg.innerHTML = `<div class="pef-h"><h3 id="pef-tit">Importa da Sandalia e-Fattura</h3><button class="pef-chi" type="button" aria-label="Chiudi" data-pef="chiudi">×</button></div>
+<div class="pef-b" id="pef-corpo"></div><div class="pef-f" id="pef-piede"></div>`;
+  document.body.appendChild(dlg);
+  const corpo = dlg.querySelector("#pef-corpo"), piede = dlg.querySelector("#pef-piede");
+  dlg.addEventListener("click", e => { if (e.target.closest("[data-pef=chiudi]")) dlg.close(); });
+
+  let stato = { azEf: null, righe: [], sel: new Set() };
+  const msg = (t, cls) => `<p class="pef-msg ${cls || "info"}">${t}</p>`;
+
+  function vistaConfig(errore) {
+    const c = lsGet(K_CONF, {}) || {};
+    corpo.innerHTML = (errore ? msg(esc(errore), "err") : "") + msg("Indica l'indirizzo del progetto Supabase di e-Fattura e la sua chiave pubblicabile (la stessa che usi in e-Fattura, Impostazioni → Cloud). Non inserire mai la chiave segreta.") +
+      `<div class="pef-g"><label class="pef-l">Indirizzo del progetto<input id="pef-url" placeholder="https://xxxx.supabase.co" value="${esc(c.url || "")}"></label>
+<label class="pef-l">Chiave pubblicabile<input id="pef-key" placeholder="sb_publishable_…" value="${esc(c.key || "")}"></label></div>`;
+    piede.innerHTML = `<span class="pef-sp"></span><button class="btn" type="button" data-pef="chiudi">Annulla</button><button class="btn pri" type="button" id="pef-salva">Salva</button>`;
+    piede.querySelector("#pef-salva").onclick = () => {
+      const url = normUrl(corpo.querySelector("#pef-url").value), key = corpo.querySelector("#pef-key").value.trim();
+      if (!/^https:\/\//.test(url) || !key) return vistaConfig("Compila indirizzo e chiave");
+      if (chiaveSegreta(key)) return vistaConfig("Questa è la chiave segreta: qui serve la chiave pubblicabile (sb_publishable_… oppure anon)");
+      lsSet(K_CONF, { url, key }); lsSet(K_SESS, null); avvia();
+    };
+  }
+  function vistaLogin(c, errore, mail) {
+    const s = lsGet(K_SESS, null);
+    corpo.innerHTML = (errore ? msg(esc(errore), "err") : "") +
+      msg(`Accedi con le credenziali di e-Fattura. L'accesso resta su questo dispositivo; la password non viene salvata.${c.daEfattura ? "" : ` <a href="#" id="pef-cfg">Cambia progetto</a>`}`) +
+      `<form id="pef-form" class="pef-g" autocomplete="on"><label class="pef-l">E-mail<input id="pef-mail" type="email" autocomplete="username" value="${esc(mail || (s && s.email) || "")}" required></label>
+<label class="pef-l">Password<input id="pef-pw" type="password" autocomplete="current-password" required></label><button hidden></button></form>`;
+    piede.innerHTML = `<span class="pef-sp">${esc(c.url)}</span><button class="btn" type="button" data-pef="chiudi">Annulla</button><button class="btn pri" type="button" id="pef-acc">Accedi</button>`;
+    const vai = async e => {
+      if (e) e.preventDefault();
+      const email = corpo.querySelector("#pef-mail").value.trim(), password = corpo.querySelector("#pef-pw").value;
+      if (!email || !password) return;
+      piede.querySelector("#pef-acc").disabled = true;
+      try { await auth(c, "password", { email, password }); avvia(); } catch (err) { vistaLogin(c, err.message, email); }
+    };
+    corpo.querySelector("#pef-form").onsubmit = vai; piede.querySelector("#pef-acc").onclick = vai;
+    const cfg = corpo.querySelector("#pef-cfg"); if (cfg) cfg.onclick = e => { e.preventDefault(); vistaConfig(); };
+    setTimeout(() => (corpo.querySelector("#pef-mail").value ? corpo.querySelector("#pef-pw") : corpo.querySelector("#pef-mail")).focus(), 50);
+  }
+  function errore(c, e) {
+    if (e && e.login) return vistaLogin(c, e.message);
+    corpo.innerHTML = msg(esc((e && e.message) || "Errore imprevisto"), "err");
+    piede.innerHTML = `<span class="pef-sp"></span><button class="btn" type="button" data-pef="chiudi">Chiudi</button><button class="btn" type="button" id="pef-rip">Riprova</button>`;
+    piede.querySelector("#pef-rip").onclick = avvia;
+  }
+
+  async function avvia() {
+    const sog = A.soggetto();
+    if (!sog) { corpo.innerHTML = msg(`Crea o seleziona prima l'${A.nomeSoggetto()} in questo modulo.`, "err"); piede.innerHTML = `<button class="btn" type="button" data-pef="chiudi">Chiudi</button>`; return; }
+    const pi = cifre(sog.piva), cf = maiu(sog.cf);
+    if (!pi && !cf) { corpo.innerHTML = msg(`Indica la partita IVA dell'${A.nomeSoggetto()}: serve a trovarla in e-Fattura e a distinguere emesse e ricevute.`, "err"); piede.innerHTML = `<button class="btn" type="button" data-pef="chiudi">Chiudi</button>`; return; }
+    const c = conf(); if (!c) return vistaConfig();
+    corpo.innerHTML = msg("Collegamento a e-Fattura…"); piede.innerHTML = "";
+    try {
+      const az = await rest(c, "aziende?select=id,denominazione,partita_iva,codice_fiscale&order=denominazione.asc");
+      const trovata = az.find(a => (pi && cifre(a.partita_iva) === pi) || (cf && (maiu(a.codice_fiscale) === cf || cifre(a.partita_iva) === cf)));
+      const s = await sessione(c);
+      if (!trovata) {
+        corpo.innerHTML = msg(`In e-Fattura non risulta un'azienda con partita IVA ${esc(pi || cf)} tra quelle a cui ha accesso ${esc((s && s.email) || "questo utente")}.`, "err") +
+          (az.length ? `<p class="pef-nota">Aziende accessibili: ${az.map(a => esc(`${a.denominazione} (${a.partita_iva || a.codice_fiscale || "—"})`)).join(", ")}</p>` : "");
+        piede.innerHTML = `<span class="pef-sp"></span><button class="btn" type="button" id="pef-esci">Accedi con un altro utente</button><button class="btn" type="button" data-pef="chiudi">Chiudi</button>`;
+        piede.querySelector("#pef-esci").onclick = () => { lsSet(K_SESS, null); vistaLogin(c); };
+        return;
+      }
+      stato = { azEf: trovata, righe: [], sel: new Set(), c, sess: s };
+      vistaFiltri();
+    } catch (e) { errore(c, e); }
+  }
+
+  function vistaFiltri() {
+    const anno = A.anno(), { azEf, sess } = stato;
+    corpo.innerHTML = msg(`<strong>${esc(azEf.denominazione)}</strong> · P.IVA ${esc(azEf.partita_iva || azEf.codice_fiscale || "")} · accesso ${esc((sess && sess.email) || "")}${sess && sess.prestata ? " (sessione di e-Fattura aperta in questo browser)" : ""}`) +
+      `<div class="pef-g"><label class="pef-l">Fatture<select id="pef-dir"><option value="">Emesse e ricevute</option><option value="E">Solo emesse</option><option value="R">Solo ricevute</option></select></label>
+<label class="pef-l">Dal<input id="pef-da" type="date" value="${anno}-01-01"></label><label class="pef-l">Al<input id="pef-a" type="date" value="${anno}-12-31"></label></div><div id="pef-elenco"></div>`;
+    piede.innerHTML = `<span class="pef-sp" id="pef-conta"></span>${sess && !sess.prestata ? `<button class="btn" type="button" id="pef-esci">Esci da e-Fattura</button>` : ""}<button class="btn" type="button" id="pef-cerca">Cerca</button><button class="btn pri" type="button" id="pef-imp" disabled>Importa</button>`;
+    const esci = piede.querySelector("#pef-esci"); if (esci) esci.onclick = () => { lsSet(K_SESS, null); dlg.close(); A.log("e-Fattura", "Uscito da e-Fattura su questo dispositivo", "work"); };
+    piede.querySelector("#pef-cerca").onclick = cerca;
+    piede.querySelector("#pef-imp").onclick = importa;
+    ["#pef-dir", "#pef-da", "#pef-a"].forEach(q => corpo.querySelector(q).onchange = cerca);
+    cerca();
+  }
+
+  async function cerca() {
+    const { c, azEf } = stato, el = corpo.querySelector("#pef-elenco");
+    const dir = corpo.querySelector("#pef-dir").value, da = corpo.querySelector("#pef-da").value, a = corpo.querySelector("#pef-a").value;
+    if (!da || !a || da > a) { el.innerHTML = msg("Indica un periodo valido", "err"); return; }
+    el.innerHTML = msg("Lettura delle fatture…");
+    try {
+      let q = `fatture?select=id,direzione,tipo_documento,numero,data,controparte,controparte_piva,totale,stato,nome_file&azienda_id=eq.${encodeURIComponent(azEf.id)}` +
+        `&data=gte.${da}&data=lte.${a}&stato=not.in.(BOZZA,DA_INVIARE,SCARTATA)&order=direzione.asc,data.asc,numero.asc`;
+      if (dir) q += `&direzione=eq.${dir}`;
+      const righe = await tutte(c, q);
+      stato.righe = righe;
+      stato.sel = new Set(righe.filter(r => (r.direzione === "E" ? ST_E_OK : ST_R_OK).includes(r.stato)).map(r => r.id));
+      disegna();
+    } catch (e) { errore(c, e); }
+  }
+
+  function disegna() {
+    const el = corpo.querySelector("#pef-elenco"), { righe, sel } = stato;
+    if (!righe.length) { el.innerHTML = msg("Nessuna fattura trasmessa o ricevuta nel periodo."); aggiorna(); return; }
+    const nE = righe.filter(r => r.direzione === "E").length, nR = righe.length - nE;
+    el.innerHTML = `<p class="pef-nota" style="font-size:12.5px;color:var(--muted);margin:0 0 8px">${nE} emesse, ${nR} ricevute. Restano escluse le bozze e le fatture scartate dallo SDI; le fatture ancora in attesa di esito e quelle rifiutate sono elencate ma non selezionate. Le fatture già presenti in contabilità vengono riconosciute e ignorate.</p>
+<table><thead><tr><th><input type="checkbox" id="pef-tutte" aria-label="Seleziona tutte"></th><th></th><th>Tipo</th><th>Numero</th><th>Data</th><th>Controparte</th><th class="n">Totale</th><th>Stato SDI</th></tr></thead><tbody>${righe.map(r => {
+      const ok = (r.direzione === "E" ? ST_E_OK : ST_R_OK).includes(r.stato);
+      return `<tr class="${ok ? "" : "pef-no"}"><td><input type="checkbox" data-id="${esc(r.id)}" ${sel.has(r.id) ? "checked" : ""} aria-label="Seleziona ${esc(r.numero)}"></td>
+<td><span class="pef-dir">${r.direzione === "E" ? "EMESSA" : "RICEVUTA"}</span></td><td>${esc(r.tipo_documento)}</td><td>${esc(r.numero)}</td><td>${dataIt(r.data)}</td>
+<td>${esc(r.controparte)}${r.controparte_piva ? `<br><span style="font-size:11.5px;color:var(--muted)">${esc(r.controparte_piva)}</span>` : ""}</td><td class="n">${eur(r.totale)}</td><td>${esc(ST_NOMI[r.stato] || r.stato)}</td></tr>`;
+    }).join("")}</tbody></table>`;
+    el.querySelectorAll("input[data-id]").forEach(cb => cb.onchange = () => { cb.checked ? sel.add(cb.dataset.id) : sel.delete(cb.dataset.id); aggiorna(); });
+    el.querySelector("#pef-tutte").onchange = e => { righe.forEach(r => e.target.checked ? sel.add(r.id) : sel.delete(r.id)); disegna(); };
+    aggiorna();
+  }
+  function aggiorna() {
+    const n = stato.sel.size, b = piede.querySelector("#pef-imp"), t = piede.querySelector("#pef-conta");
+    if (b) { b.disabled = !n; b.textContent = n ? `Importa ${n} fattur${n === 1 ? "a" : "e"}` : "Importa"; }
+    if (t) t.textContent = stato.righe.length ? `${n} di ${stato.righe.length} selezionate` : "";
+  }
+
+  async function importa() {
+    const { c } = stato, ids = stato.righe.filter(r => stato.sel.has(r.id)).map(r => r.id);
+    if (!ids.length) return;
+    const b = piede.querySelector("#pef-imp"); b.disabled = true; b.textContent = "Lettura dell'XML…";
+    try {
+      const ord = new Map(ids.map((id, i) => [id, i])), letti = [], senza = [];
+      for (let i = 0; i < ids.length; i += 40) {
+        const parte = await rest(c, `fatture?select=id,direzione,numero,data,nome_file,xml&id=in.(${ids.slice(i, i + 40).map(encodeURIComponent).join(",")})`);
+        for (const r of parte) {
+          if (!r.xml || !/FatturaElettronica/.test(r.xml)) { senza.push(r.numero || r.id); continue; }
+          let nome = String(r.nome_file || "").replace(/\.p7m$/i, "").replace(/[\\/:*?"<>|]/g, "_");
+          if (!nome) nome = `${r.direzione === "E" ? "emessa" : "ricevuta"}_${String(r.numero || r.id).replace(/[^\w-]/g, "_")}_${r.data || ""}.xml`;
+          if (!/\.xml$/i.test(nome)) nome += ".xml";
+          letti.push({ i: ord.get(r.id), f: new File([r.xml], nome, { type: "application/xml" }) });
+        }
+      }
+      const files = letti.sort((x, y) => x.i - y.i).map(x => x.f);
+      dlg.close();
+      A.log("e-Fattura", `${files.length} fattur${files.length === 1 ? "a" : "e"} lett${files.length === 1 ? "a" : "e"} da Sandalia e-Fattura: le già registrate vengono ignorate`, "ok");
+      if (senza.length) A.log("e-Fattura", `XML non disponibile per ${senza.length} fattur${senza.length === 1 ? "a" : "e"}: ${senza.slice(0, 8).join(", ")}${senza.length > 8 ? "…" : ""}`, "err");
+      if (files.length) await A.leggi(files);
+    } catch (e) { errore(c, e); }
+  }
+
+  function apri() {
+    if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute("open", "");
+    avvia();
+  }
+
+  /* pulsante sotto la zona di caricamento delle fatture */
+  const zona = A.zona();
+  if (zona) {
+    const bar = document.createElement("div"); bar.className = "pef-bar";
+    bar.innerHTML = `<button class="btn" type="button" id="pef-apri"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Importa da e-Fattura</button><span class="pef-nota">Fatture emesse e ricevute di Sandalia e-Fattura, senza scaricare file</span>`;
+    const inp = zona.nextElementSibling && zona.nextElementSibling.matches('input[type="file"]') ? zona.nextElementSibling : zona;
+    inp.insertAdjacentElement("afterend", bar);
+    bar.querySelector("#pef-apri").onclick = apri;
+  }
+  window.ponteEfattura = { apri };
+})();
+</script>
 </body>
 </html>
